@@ -1140,7 +1140,7 @@ ggplot(Cities_Total_NPL, aes(x = year, y = TotalNPL)) +
   geom_col(fill = "#F27E52") +
   geom_text(aes(label = paste0(dollar_format()(TotalNPL / 1000000000), "B")),
             position = position_stack(vjust = 0.5), color = "black", size = 3) +
-  labs(title = "Top 100 States Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
+  labs(title = "Top 100 Cities Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
   scale_y_continuous(breaks = pretty_breaks(n = 10),
                      labels = function(x) paste0(dollar_format(scale = 1/1000000000)(x), "B")) +
   theme_reason() +
@@ -1159,7 +1159,7 @@ Cities_Total_NPLchange %>%
   ) %>%
   kable(format = "html", col.names = c("", "", "")) %>%
   kable_styling() %>%
-  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  add_header_above(c("Cities Total Net Pension Liability" = 3), escape = FALSE) %>%
   kable_styling(full_width = FALSE)
 
 
@@ -1248,7 +1248,7 @@ ggplot(Counties_Total_NPL, aes(x = year, y = TotalNPL)) +
   geom_col(fill = "#EBBE5C") +
   geom_text(aes(label = paste0(dollar_format()(TotalNPL / 1000000000), "B")),
             position = position_stack(vjust = 0.5), color = "black", size = 3) +
-  labs(title = "Top 100 States Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
+  labs(title = "Top 100 Counties Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
   scale_y_continuous(breaks = pretty_breaks(n = 10),
                      labels = function(x) paste0(dollar_format(scale = 1/1000000000)(x), "B")) +
   theme_reason() +
@@ -1267,7 +1267,7 @@ Counties_Total_NPLchange %>%
   ) %>%
   kable(format = "html", col.names = c("", "", "")) %>%
   kable_styling() %>%
-  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  add_header_above(c("Counties Total Net Pension Liability" = 3), escape = FALSE) %>%
   kable_styling(full_width = FALSE)
 
 
@@ -1370,7 +1370,7 @@ SD_Total_NPLchange %>%
   ) %>%
   kable(format = "html", col.names = c("", "", "")) %>%
   kable_styling() %>%
-  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  add_header_above(c("School Districts Total Net Pension Liability" = 3), escape = FALSE) %>%
   kable_styling(full_width = FALSE)
 
 
@@ -1432,11 +1432,11 @@ top_PS_SD_2022 <- top_PS_SD_2022 %>%
   mutate_at(vars("Per Student Net Pension Liability", "Total NPL"), scales::dollar)
 
  
-html_table <- top_SD_2022 %>%
+html_table_top_SD_2022 <- top_SD_2022 %>%
   kable() %>%
   kable_styling(full_width = FALSE)
 
-html_table
+html_table_top_SD_2022
 ```
 
 
