@@ -1,0 +1,1444 @@
+---
+title: "ACFR Overview"
+author: "Mariana F Trujillo"
+date: "April 2024"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)
+library(rio)
+library(ggridges)
+library(ggpattern)
+library(ggdist)
+library(ggbeeswarm)
+library(ggstream)
+library(ggpubr)
+library(scales)
+library(knitr)
+library(reactable)
+library(htmltools)
+library(zoo)
+library(quantmod)
+library(PerformanceAnalytics)
+library(quadprog)
+library(janitor)
+library(kableExtra)
+library(patchwork)
+library(showtext)
+library(RColorBrewer)
+library(reshape2)
+
+
+States3y <- read.csv("all_states_3years.csv")
+Cities3y <- read.csv("top100_cities_3years.csv")
+Counties3y <- read.csv("top100_counties_3years.csv")
+SD3y <- read.csv("top100_sd_3years.csv")
+CensusStates <- read.csv("CensusStates.csv")
+CensusCities_Counties <- read.csv("CensusCities_Conties.csv")
+
+
+source("APR functions.R")
+source("Pension projection functions.R")
+source("Reason theme.R")
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  fig.align = "center",
+  cache = FALSE
+)
+```
+
+```{r, echo=FALSE}
+#Add per capita
+States3y <- States3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+Cities3y  <- Cities3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+Counties3y <- Counties3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+SD3y <- SD3y %>%
+  mutate(npl_per_student= net_pension_liability / students) 
+
+```
+
+
+# Moves in Unfunded Liabiities from 2020-2021
+
+## By Entity 
+Moves in Unfunded Liabilities from 2020-2021
+
+#### Figure 1:Total Unfunded Liabilities by Entity from 2020-2022
+```{r, echo=FALSE}
+
+Combined3y <- bind_rows(
+  mutate(States3y, dataset = "States"),
+  mutate(Cities3y, dataset = "Cities"),
+  mutate(Counties3y, dataset = "Counties"),
+  mutate(SD3y, dataset = "School Districts")
+)
+
+Combined3y <- Combined3y %>%
+  mutate(population = ifelse(dataset == "School Districts", students, population))
+
+total_unfunded_liabilities <- Combined3y %>%
+  group_by(year, dataset) %>%
+  summarise(total_unfunded_liabilities = sum(net_pension_liability, na.rm = TRUE), .groups = "drop")
+
+total_unfunded_liabilities$dataset <- factor(total_unfunded_liabilities$dataset, levels = c("States", "Cities", "Counties", "School Districts"))
+
+
+```
+
+
+```{r, echo=FALSE}
+
+Combined3y <- Combined3y %>%
+  mutate(population = ifelse(dataset == "School Districts", students, population))
+
+total_unfunded_liabilities <- Combined3y %>%
+  group_by(year, dataset) %>%
+  summarise(total_unfunded_liabilities = sum(net_pension_liability, na.rm = TRUE), .groups = "drop")
+
+total_unfunded_liabilities$dataset <- factor(total_unfunded_liabilities$dataset, levels = c("States", "Cities", "Counties", "School Districts"))
+
+
+CensusCities_Counties$name <- trimws(tolower(CensusCities_Counties$name))
+
+Counties3y_C <- inner_join(Counties3y, CensusCities_Counties, by = c("name", "state.abb"))
+
+
+```
+
+
+##### Figure 2:Rate of Change in Unfunded Liabilities by Entity from 2020-2022
+
+```{r, echo=FALSE}
+
+States_Total_NPL <- States3y %>%
+  group_by(year) %>%
+  summarise(TotalOPEB = sum(net_opeb_liability, na.rm = TRUE),
+            TotalNPL = sum(net_pension_liability, na.rm = TRUE))
+
+States_Total_NPLchange <- States_Total_NPL %>%
+  mutate(change_OPEB = (TotalOPEB - lag(TotalOPEB)) / lag(TotalOPEB) * 100,
+         change_NPL = (TotalNPL - lag(TotalNPL)) / lag(TotalNPL) * 100)
+
+
+SD_Total_NPL <- SD3y %>%
+  group_by(year) %>%
+  summarise(TotalOPEB = sum(net_opeb_liability, na.rm = TRUE),
+            TotalNPL = sum(net_pension_liability, na.rm = TRUE))
+
+SD_Total_NPLchange <- SD_Total_NPL %>%
+  mutate(change_OPEB = (TotalOPEB - lag(TotalOPEB)) / lag(TotalOPEB) * 100,
+         change_NPL = (TotalNPL - lag(TotalNPL)) / lag(TotalNPL) * 100)
+
+
+Cities_Total_NPL <- Cities3y %>%
+  group_by(year) %>%
+  summarise(TotalOPEB = sum(net_opeb_liability, na.rm = TRUE),
+            TotalNPL = sum(net_pension_liability, na.rm = TRUE))
+
+Cities_Total_NPLchange <- Cities_Total_NPL %>%
+  mutate(change_OPEB = (TotalOPEB - lag(TotalOPEB)) / lag(TotalOPEB) * 100,
+         change_NPL = (TotalNPL - lag(TotalNPL)) / lag(TotalNPL) * 100)
+
+
+Counties_Total_NPL <- Counties3y %>%
+  group_by(year) %>%
+  summarise(TotalOPEB = sum(net_opeb_liability, na.rm = TRUE),
+            TotalNPL = sum(net_pension_liability, na.rm = TRUE))
+
+Counties_Total_NPLchange <- Counties_Total_NPL %>%
+  mutate(change_OPEB = (TotalOPEB - lag(TotalOPEB)) / lag(TotalOPEB) * 100,
+         change_NPL = (TotalNPL - lag(TotalNPL)) / lag(TotalNPL) * 100)
+
+combined_change_data <- bind_rows(
+  States_Total_NPLchange %>% mutate(Dataset = "State"),
+  SD_Total_NPLchange %>% mutate(Dataset = "SD"),
+  Cities_Total_NPLchange %>% mutate(Dataset = "City"),
+  Counties_Total_NPLchange %>% mutate(Dataset = "County")
+) %>%
+select(change_OPEB,change_NPL, Dataset, year, TotalOPEB, TotalNPL)
+
+orange_colors <- brewer.pal(3, "Reds")
+
+
+combined_change_data %>%
+  ggplot(aes(x = Dataset, y = TotalNPL, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = scales::dollar(TotalNPL/1000000000, prefix = "$", suffix = "B", accuracy = 0.1)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE,
+            hjust = -0.2) +  
+  labs(
+    title = "NPL by Entity",
+    x = "Entity",
+    y = "Unfunded Liability",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = orange_colors) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", scale = 1, accuracy = 2)) +  
+  coord_flip() +
+  theme_reason ()
+
+```
+
+```{r, echo=FALSE}
+
+combined_change_data <- combined_change_data %>%
+  group_by(Dataset) %>%
+  mutate(
+    TotalNPL_20_22 = TotalNPL[year == 2022] - TotalNPL[year == 2020],
+    TotalOPEB_20_22 = TotalOPEB[year == 2022] - TotalOPEB[year == 2020],
+    TotalNPL_percent_20_22 = (TotalNPL[year == 2022] - TotalNPL[year == 2020]) / TotalNPL[year == 2020],
+    TotalOPEB_percent_20_22 = (TotalOPEB[year == 2022] - TotalOPEB[year == 2020]) / TotalOPEB[year == 2020]
+  ) %>%
+  ungroup()
+
+
+
+combined_change_data %>%
+  ggplot(aes(x = Dataset, y = TotalOPEB, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = scales::dollar(TotalOPEB/1000000000, prefix = "$", suffix = "B", accuracy = 0.1)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE,
+            hjust = -0.2) +  # Adjust position to sit outside the graph
+  labs(
+    title = "Net OPEB Liability by Entity",
+    x = "Entity",
+    y = "Unfunded Liability",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = orange_colors) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", scale = 1, accuracy = 2)) +  
+  coord_flip() +
+  theme_reason ()
+
+
+```
+
+```{r, echo=FALSE}
+
+ggplot(combined_change_data, aes(x = year)) +
+  geom_bar(aes(y = TotalNPL, fill = "TotalNPL"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = TotalOPEB, fill = "TotalOPEB"), stat = "identity", position = "dodge") +
+  labs(
+    title = "TotalOPEB and TotalNPL by Dataset",
+    x = "Year",
+    y = "Total Value",
+    fill = "Legend"
+  ) +
+  scale_fill_manual(values = c("TotalNPL" = "#FF0000", "TotalOPEB" = "#8B0000")) +
+  facet_wrap(~Dataset, scales = "free_y", nrow = 2) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", scale = 1/1e9, suffix = "B"))+
+  theme_reason ()
+
+```
+
+
+```{r, echo=FALSE}
+
+combined_change_data %>%
+  select(Dataset, year, TotalOPEB, TotalNPL) %>%
+  mutate(TotalOPEB = scales::dollar_format()(TotalOPEB),
+         TotalNPL = scales::dollar_format()(TotalNPL)) %>%
+  arrange(Dataset, year) %>%
+  knitr::kable(caption = "Combined Change Data Arranged by Dataset") %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+```{r, echo=FALSE}
+
+combined_change_data %>%
+  filter(year == 2022) %>%
+  select(Dataset, TotalNPL_20_22, TotalNPL_percent_20_22, TotalOPEB_20_22, TotalOPEB_percent_20_22) %>%
+  mutate(
+    TotalNPL_20_22 = dollar(TotalNPL_20_22),
+    TotalOPEB_20_22 = dollar(TotalOPEB_20_22),
+    TotalNPL_percent_20_22 = percent(TotalNPL_percent_20_22),
+    TotalOPEB_percent_20_22 = percent(TotalOPEB_percent_20_22)
+  ) %>%
+  knitr::kable(col.names = c("Entity", "NPL Change","NPL Percent Change",  "Net OPEB Change", "OPEB Percent Change"), caption = "Changes in Total OPEB Unfunded Liabilities 2020-2022 by Entity") %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+
+## By Population
+Moves in Unfunded Liabiities from 2020-2021
+
+#### Cities
+
+##### Figure 3:Correlation between Population and Unfunded Liabilities in 2020 - 2022
+```{r, echo=FALSE}
+
+Cities3y_sorted <- Cities3y %>%
+  arrange(name, state.abb, year)
+
+cities_NPL_20to22diff <- Cities3y_sorted %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_NPL20to22 = last(net_pension_liability) - first(net_pension_liability),
+    percent_difference_NPL20to22 = (last(net_pension_liability) - first(net_pension_liability)) / first(net_pension_liability) * 100,
+    nominal_difference_L20to22 = last(total_liabilities) - first(total_liabilities),
+    percent_difference_L20to22 = (last(total_liabilities) - first(total_liabilities)) / first(total_liabilities) * 100,.groups = "drop"
+
+  )
+
+cities_NPL_20to22diff_filter <- cities_NPL_20to22diff %>%
+  filter(year == 2022)
+
+
+Cities3y_sorted <- Cities3y %>%
+  arrange(name, state.abb, year)
+
+```
+
+
+```{r, echo=FALSE}
+
+Combined3y_sorted <- Combined3y %>%
+  arrange(name, state.abb, year)
+
+Combined3y_20_22 <- Combined3y_sorted %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_NPL20to22 = last(net_pension_liability) - first(net_pension_liability),
+    percent_difference_NPL20to22 = (last(net_pension_liability) - first(net_pension_liability)) / first(net_pension_liability) * 100,
+    nominal_difference_L20to22 = last(total_liabilities) - first(total_liabilities),
+    percent_difference_L20to22 = (last(total_liabilities) - first(total_liabilities)) / first(total_liabilities) * 100,.groups = "drop"
+
+  )
+
+Combined3y_20_22_filter <- Combined3y_20_22 %>%
+  filter(year == 2022)
+
+
+
+```
+
+
+
+```{r, echo=FALSE}
+
+colors <- c("#F27E52", "#EBBE5C", "#4B8CC7", "#7CA825")
+
+```
+
+```{r, echo=FALSE}
+#| fig-cap: "States: Correlation Between % Difference in NPL Population"
+
+ggplot(Combined3y_20_22_filter %>% filter(dataset == "States"), aes(x = population/1000000, y = percent_difference_NPL20to22)) +
+  geom_point(alpha = 0.4, color = "#7CA825") +  # Add dots colored 7CA825 with transparency
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  # Add correlation line
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +  
+  labs(x = "Population (Millions)", y = "% Difference NPL 2020 - 2022") +
+  ggtitle("States: Correlation Between % Difference in NPL Population") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Limit y-axis from -20% to 20%
+  theme_reason()
+
+```
+
+```{r, echo=FALSE}
+#| fig-cap: "Cities: Correlation Between % Difference in NPL Population"
+
+ggplot(Combined3y_20_22_filter %>% filter(dataset == "Cities"), aes(x = population/1000, y = percent_difference_NPL20to22)) +
+  geom_point(alpha = 0.4, color = "#F27E52") +  # Add dots colored 7CA825 with transparency
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  # Add correlation line
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +  
+  labs(x = "Population (Thounsands)", y = "% Difference NPL 2020 - 2022") +
+  ggtitle("Cities: Correlation Between % Difference in NPL Population") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Limit y-axis from -20% to 20%
+  theme_reason()
+
+```
+
+
+```{r, echo=FALSE}
+#| fig-cap: "Counties: Correlation Between % Difference in NPL Population"
+
+ggplot(Combined3y_20_22_filter %>% filter(dataset == "Counties"), aes(x = population/1000, y = percent_difference_NPL20to22)) +
+  geom_point(alpha = 0.4, color = "#EBBE5C") +  # Add dots colored 7CA825 with transparency
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  # Add correlation line
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +  
+  labs(x = "Population (Thousands)", y = "% Difference NPL 2020 - 2022") +
+  ggtitle("Counties: Correlation Between % Difference in NPL Population") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Limit y-axis from -20% to 20%
+  theme_reason()
+
+```
+
+```{r, echo=FALSE}
+#| fig-cap: "School Districts: Correlation Between % Difference in NPL Population"
+
+ggplot(Combined3y_20_22_filter %>% filter(dataset == "School Districts"), aes(x = population/1000, y = percent_difference_NPL20to22)) +
+  geom_point(alpha = 0.4, color = "#4B8CC7") +  # Add dots colored 7CA825 with transparency
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  # Add correlation line
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +  
+  labs(x = "Population (Thousands)", y = "% Difference NPL 2020 - 2022") +
+  ggtitle("School Districts: Correlation Between % Difference in NPL Population") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) + 
+  theme_reason()
+
+```
+
+
+
+
+
+```{r, echo=FALSE}
+#| fig-cap: "Total Unfunded Liabilities 2020-2022 - Cities divided by Population Quartiles"
+
+Cities3y_q <- Cities3y %>%
+  group_by(year) %>%
+  mutate(PopulationQuartile = ntile(population, 4))
+
+c_summary_quartiles <- Cities3y_q %>%
+  group_by(year, PopulationQuartile) %>%
+  summarise(total_liabilities = sum(net_pension_liability, na.rm = TRUE), .groups = 'drop') 
+
+c_summary_quartiles <- c_summary_quartiles %>%
+  group_by(PopulationQuartile) %>%
+  mutate(
+    rate_of_change = (total_liabilities / lag(total_liabilities, default = first(total_liabilities)) - 1) * 100,
+    nominal_difference = total_liabilities - lag(total_liabilities, default = first(total_liabilities))
+  )
+
+quartile_colors <- c("1" = "#FCD1A2", "2" = "#FCAD6B", "3" = "#FD8D3C", "4" = "#F06813")
+
+ggplot(c_summary_quartiles, aes(x = year, y = total_liabilities, color = as.factor(PopulationQuartile), group = PopulationQuartile)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "City Total Liabilities by Population Quartiles 2020-2022",
+    x = "Year",
+    y = "Total Liabilities",
+    color = "Population Quartile:" ) +
+  scale_color_manual(values = quartile_colors) +
+  scale_y_continuous(labels = scales::dollar_format(scale = 1e-9, suffix = "B")) + 
+  theme_reason()
+
+
+
+```
+```{r, echo=FALSE}
+Cities3y_q_2022 <- Cities3y_q %>%
+  filter(year == 2022) %>%
+  group_by(PopulationQuartile) %>%
+  summarise(min_population = min(population, na.rm = TRUE),
+            max_population = max(population, na.rm = TRUE))
+
+quartile_data_2022_formatted <- Cities3y_q_2022 %>%
+  mutate(across(c(min_population, max_population), ~format(.x, big.mark = ",")))
+
+
+quartile_data_2022_formatted %>%
+  knitr::kable(caption = "Population Ranges of Each City Quartile (2022)", col.names = c("Quartile", "Min", "Max")) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+##### Figure 4:Total Unfunded Liabilities 2020-2022 - Cities divided by Population Quartiles
+```{r, echo=FALSE}
+
+c_summary_quartiles_21.22 <- c_summary_quartiles %>%
+  filter(year %in% c(2021, 2022))
+
+
+quartile_colors <- c("1" = "#FCD1A2", "2" = "#FCAD6B", "3" = "#FD8D3C", "4" = "#F06813")
+
+ggplot(c_summary_quartiles_21.22, aes(x = year, y = rate_of_change, color = as.factor(PopulationQuartile), group = PopulationQuartile)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Rate of Change in City Unfunded Liabilities by Population Quartiles",
+    x = "Year",
+    y = "Rate of Change (%)",
+    color = "Population Quartile" ) +
+  scale_color_manual(values = quartile_colors) +
+  theme_reason()
+
+
+```
+```{r, echo=FALSE}
+
+c_summary_quartiles_21.22 %>%
+  arrange(PopulationQuartile) %>%
+  mutate(
+    `total_liabilities` = scales::dollar(`total_liabilities`),
+    `rate_of_change` = scales::percent(`rate_of_change`, scale = 1),
+    `nominal_difference` = scales::dollar(`nominal_difference`)
+  ) %>%
+  knitr::kable(caption = "Changes in City Unfunded Liabilities by Population Quartiles", col.names = c("Year", "Pop Quartile", "Total NPL", "% Change from Previous Year", "$ Change from Previous Year")) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r, echo=FALSE}
+
+
+selected_columns_cities_NPL_20to22diff_subset <- c("name", "state.abb", "nominal_difference_NPL20to22", "percent_difference_NPL20to22", "nominal_difference_L20to22", "percent_difference_L20to22", "population")
+cities_NPL_20to22diff_subset <- cities_NPL_20to22diff_filter[selected_columns_cities_NPL_20to22diff_subset]
+
+cities_NPL_20to22diff_reactable <- reactable(
+  cities_NPL_20to22diff_subset,
+  columns = list(
+    name = colDef(name = "City Name"),
+    state.abb = colDef(name = "State"),
+    nominal_difference_NPL20to22 = colDef(
+      name = "Nominal Change Net Pension Liabilities 2020 - 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_NPL20to22 = colDef(
+      name = "Percent Change Net Pension Liabilities 2020 - 2022",
+      format = colFormat(suffix = "%", digits = 1)),
+    nominal_difference_L20to22 = colDef(
+      name = "Nominal Change Total Liabilities 2020 - 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_L20to22 = colDef(
+      name = "Percent Change Total Liabilities 2020 - 2022",
+      format = colFormat(suffix = "%", digits = 1)),
+    population = colDef(
+      name = "Population",
+      cell = function(value) format(value, big.mark = ",")
+    )
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+
+cities_NPL_20to22diff_reactable
+
+```
+
+
+## Correlations
+
+```{r, echo=FALSE}
+
+States3y_oo <- States3y %>%
+  group_by(year) %>%
+summarise(
+  NPLtotal = sum(net_pension_liability),
+  OpebNtotal = sum(net_opeb_liability)
+)
+
+```
+
+
+```{r, echo=FALSE}
+
+counties_NPL_20to22diff_OPEB <- Counties3y %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_OPEB20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    percent_difference_OPEB20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+  )
+ 
+counties_NPL_20to22diff_OPEB_filter <- counties_NPL_20to22diff_OPEB %>%
+  filter(year == 2022)
+
+
+```
+
+```{r, echo=FALSE}
+
+Counties3y_C <- inner_join(counties_NPL_20to22diff_OPEB, CensusCities_Counties, by = c("name", "state.abb"))
+
+Counties3y_C_capita <- Counties3y_C %>%
+  mutate(
+    opeb_L_capita = net_opeb_liability / population, 
+    total_L_capita = net_pension_liability / population 
+  )
+
+
+```
+
+```{r, echo=FALSE}
+#County Calculations
+Counties3y_C_2 <- subset(Counties3y_C_capita, select = -c(X.x, X.y, year, state.abb, state.name, geo_id, id, name, net_pension_assets,net_opeb_assets,net_opeb_liability, median_hh_income_21, current_liabilities, total_liabilities, net_pension_liability, net_opeb_liability, expenses, revenues, urban_pop, Poverty.Estimate..Age.0.17, Poverty.Estimate..All.Ages, Poverty.Percent..Age.0.17))
+
+Counties3y_C_2[] <- lapply(Counties3y_C_2, function(x) {
+  x <- as.numeric(as.character(x))
+  x[!is.finite(x)] <- NA  # Replace non-finite values with NA
+  return(x)
+})
+
+# Remove rows with any NA values (you might consider a different strategy based on your data needs)
+Counties3y_C_2 <- na.omit(Counties3y_C_2)
+
+corCounties <- cor(Counties3y_C_2, use = "pairwise.complete.obs")
+
+
+
+```
+
+
+```{r, echo=FALSE}
+
+States3y_2 <- subset(States3y, select = -c(X, year, state.abb, state.name, geo_id, name, net_pension_assets, revenues))
+corStates <- cor(States3y_2)
+
+# For Cities3y
+Cities3y_2 <- subset(Cities3y, select = -c(X, year, state.abb, state.name, geo_id, name, net_pension_assets))
+corCities <- cor(Cities3y_2)
+
+# For SD3y
+SD3y_2 <- subset(SD3y, select = -c(X, state.abb, state.name, ncesID, name, county_name, city, locale, year,nces_original_name, net_pension_assets, net_opeb_assets, id))
+corSD <- cor(SD3y_2)
+
+
+```
+
+
+### States
+```{r, echo=FALSE}
+melted_corStates <- melt(corStates)
+
+ggplot(melted_corStates, aes(Var1, Var2, fill = value)) +
+  geom_tile() +  
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 3) +  
+  scale_fill_gradient2(low = "red", high = "green", mid = "gray", midpoint = 0) +  
+  theme_minimal() +  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.text.y = element_text(angle = 45, hjust = 1)  
+  ) +
+  labs(
+    title = "Correlation Matrix: States",  
+    x = "",  
+    y = "",  
+    fill = "Correlation Strength" 
+  )
+
+```
+
+
+### Cities
+```{r, echo=FALSE}
+melted_corStates <- melt(corCities)
+
+ggplot(melted_corStates, aes(Var1, Var2, fill = value)) +
+  geom_tile() +  
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 3) +  
+  scale_fill_gradient2(low = "red", high = "green", mid = "gray", midpoint = 0) +  
+  theme_minimal() +  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.text.y = element_text(angle = 45, hjust = 1)  
+  ) +
+  labs(
+    title = "Correlation Matrix: Cities",  
+    x = "",  
+    y = "",  
+    fill = "Correlation Strength" 
+  )
+
+```
+
+### Counties
+```{r, echo=FALSE}
+
+corCounties <- melt(corCounties)
+
+ggplot(corCounties, aes(Var1, Var2, fill = value)) +
+  geom_tile() +  
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 3) +  
+  scale_fill_gradient2(low = "red", high = "green", mid = "gray", midpoint = 0) +  
+  theme_minimal() +  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+  ) +
+  labs(
+    title = "Correlation Matrix: Counties",  
+    x = "",  
+    y = "",  
+    fill = "Correlation Strength" 
+  )
+
+
+```
+
+
+### School Districts 
+```{r, echo=FALSE}
+melted_corStates <- melt(corSD)
+
+ggplot(melted_corStates, aes(Var1, Var2, fill = value)) +
+  geom_tile() +  
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 3) +  
+  scale_fill_gradient2(low = "red", high = "green", mid = "gray", midpoint = 0) +  
+  theme_minimal() +  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.text.y = element_text(angle = 45, hjust = 1)  
+  ) +
+  labs(
+    title = "Correlation Matrix: School Districts",  
+    x = "",  
+    y = "",  
+    fill = "Correlation Strength" 
+  )
+
+```
+
+
+
+## OPEB 
+
+### What happened from 2020 to 2022?
+
+```{r, echo=FALSE}
+
+total_OPEB_liabilities <- Combined3y %>%
+  group_by(dataset, year) %>%
+  summarize(OPEB_npl = sum(net_opeb_liability, na.rm = TRUE), .groups = "drop")
+
+total_OPEB_liabilities <- total_OPEB_liabilities %>%
+   arrange(dataset, year)
+
+total_OPEB_liabilities <- total_OPEB_liabilities %>%
+  mutate(
+    first_total_OPEB = first(OPEB_npl),
+    last_total_OPEB = last(OPEB_npl),
+    OPEB_nominal_difference_NPL20to22 = last_total_OPEB - first_total_OPEB,
+    OPEB_percent_difference_NPL20to22 = ((last_total_OPEB - first_total_OPEB) / first_total_OPEB) * 100,
+    OPEB_nominal_difference_L20to22 = last_total_OPEB - first_total_OPEB,  
+    OPEB_percent_difference_L20to22 = ((last_total_OPEB - first_total_OPEB) / first_total_OPEB) * 100,
+    .groups = "drop"
+  )
+
+
+```
+
+```{r, echo=FALSE}
+
+total_OPEB_liabilities %>%
+  ggplot(aes(x = dataset, y = OPEB_npl, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = dollar(OPEB_npl/1000000000, prefix = "$", suffix = "B", accuracy = 0.1)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE,
+            hjust = 0.5) +  # Adjusted for better label positioning
+  labs(
+    title = "Change in Unfunded OPEB Liabilities by Entity",
+    x = "Entity",
+    y = "Unfunded Liability",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = c(orange_colors)) +  
+  theme_minimal() +
+  scale_y_continuous(labels = dollar_format(prefix = "$", scale = 1, accuracy = 1)) +  
+  coord_flip()
+
+
+```
+
+
+```{r, echo=FALSE}
+
+combined_change_data %>%
+  filter(year == 2022) %>%
+  select(Dataset, year, TotalOPEB_20_22, TotalOPEB_percent_20_22) %>%
+  mutate(
+    TotalOPEB_20_22 = dollar(TotalOPEB_20_22),
+    TotalOPEB_percent_20_22 = percent(TotalOPEB_percent_20_22)
+  ) %>%
+  knitr::kable(col.names = c("Entity", "Year", "Net OPEB Change", "OPEB Percent Change"), caption = "Changes in Total OPEB Unfunded Liabilities 2020-2022 by Entity") %>%
+  kable_styling(full_width = FALSE)
+
+
+
+```
+
+
+
+
+
+### States
+
+```{r, echo=FALSE}
+
+combined_change_data %>%
+  filter(Dataset == "State") %>%
+  select(year, TotalOPEB_20_22, TotalOPEB_percent_20_22) %>%
+  mutate(
+    TotalOPEB_20_22 = dollar(TotalOPEB_20_22),
+    TotalOPEB_percent_20_22 = percent(TotalOPEB_percent_20_22)
+  ) %>%
+  knitr::kable(col.names = c("Year", "Net OPEB Change", "OPEB Percent Change"), caption = "Changes in State OPEB Unfunded Liabilities 2020-2022") %>%
+  kable_styling(full_width = FALSE)
+
+
+```
+
+```{r, echo=FALSE}
+
+states_NPL_20to22diff_OPEB <- States3y %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_OPEB20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    percent_difference_OPEB20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+  )
+ 
+states_NPL_20to22diff_OPEB_filter <- states_NPL_20to22diff_OPEB %>%
+  filter(year == 2022)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+selected_columns_states_OPEB_20to22diff_subset <- c("name", "nominal_difference_OPEB20to22", "percent_difference_OPEB20to22","net_opeb_liability")
+states_OPEB_20to22diff_subset <- states_NPL_20to22diff_OPEB_filter[selected_columns_states_OPEB_20to22diff_subset]
+
+states_OPEB_20to22diff_reactable <- reactable(
+  states_OPEB_20to22diff_subset,
+  columns = list(
+    name = colDef(name = "City"),
+    nominal_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability $ Difference 20->22",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability % Difference 20->22",
+      cell = function(value) sprintf("%.2f %%", value)), # Changed here
+    net_opeb_liability = colDef(
+      name = "Net OPEB Liability in 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+states_OPEB_20to22diff_reactable
+
+```
+
+### Cities
+
+
+```{r, echo=FALSE}
+
+Cities3yy_sorted <- Cities3y %>%
+  arrange(name, state.abb, year)
+
+
+Cities_NPL_20to22diff_OPEB <- Cities3yy_sorted %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_OPEB20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    percent_difference_OPEB20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+  )
+ 
+Cities_NPL_20to22diff_OPEB_filter <- Cities_NPL_20to22diff_OPEB %>%
+  filter(year == 2022)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+selected_columns_cities_OPEB_20to22diff_subset <- c("name", "state.abb", "nominal_difference_OPEB20to22", "percent_difference_OPEB20to22","net_opeb_liability")
+Cities_OPEB_20to22diff_subset <- Cities_NPL_20to22diff_OPEB_filter[selected_columns_cities_OPEB_20to22diff_subset]
+
+Cities_OPEB_20to22diff_reactable <- reactable(
+ Cities_OPEB_20to22diff_subset,
+  columns = list(
+    name = colDef(name = "City"),
+    state.abb = colDef(name = "State"),
+    nominal_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability $ Difference 20->22",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability % Difference 20->22",
+      cell = function(value) sprintf("%.2f %%", value)), # Changed here
+    net_opeb_liability = colDef(
+      name = "Net OPEB Liability in 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+Cities_OPEB_20to22diff_reactable
+
+```
+
+
+
+```{r, echo=FALSE}
+
+cities_NPL_20to22diff_OPEB <- Cities3y_sorted %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_OPEB20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    percent_difference_OPEB20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+  )
+ 
+cities_NPL_20to22diff_OPEB_filter <- cities_NPL_20to22diff_OPEB %>%
+  filter(year == 2022)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+selected_columns_cities_OPEB_20to22diff_subset <- c("name", "state.abb", "nominal_difference_OPEB20to22", "percent_difference_OPEB20to22","net_opeb_liability")
+cities_OPEB_20to22diff_subset <- cities_NPL_20to22diff_OPEB_filter[selected_columns_cities_OPEB_20to22diff_subset]
+
+cities_OPEB_20to22diff_reactable <- reactable(
+  cities_OPEB_20to22diff_subset,
+  columns = list(
+    name = colDef(name = "City"),
+    state.abb = colDef(name = "State"),
+    nominal_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability $ Difference 20->22",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability % Difference 20->22",
+      cell = function(value) sprintf("%.2f %%", value)), # Changed here
+    net_opeb_liability = colDef(
+      name = "Net OPEB Liability in 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+cities_OPEB_20to22diff_reactable
+
+```
+
+### School Districs
+```{r, echo=FALSE}
+
+SD3y_sorted <- SD3y %>%
+  arrange(name, state.abb, year)
+
+
+SD_NPL_20to22diff_OPEB <- SD3y_sorted %>%
+  group_by(name, state.abb) %>%
+  mutate(
+    nominal_difference_OPEB20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    percent_difference_OPEB20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+  )
+ 
+SD_NPL_20to22diff_OPEB_filter <- SD_NPL_20to22diff_OPEB %>%
+  filter(year == 2022)
+
+
+```
+
+
+```{r, echo=FALSE}
+
+selected_columns_cities_OPEB_20to22diff_subset <- c("name", "state.abb", "nominal_difference_OPEB20to22", "percent_difference_OPEB20to22","net_opeb_liability")
+SD_OPEB_20to22diff_subset <- SD_NPL_20to22diff_OPEB_filter[selected_columns_cities_OPEB_20to22diff_subset]
+
+SD_OPEB_20to22diff_reactable <- reactable(
+  SD_OPEB_20to22diff_subset,
+  columns = list(
+    name = colDef(name = "School Distric"),
+    state.abb = colDef(name = "State"),
+    nominal_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability $ Difference 20->22",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability % Difference 20->22",
+      cell = function(value) sprintf("%.2f %%", value)), # Changed here
+    net_opeb_liability = colDef(
+      name = "Net OPEB Liability in 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+SD_OPEB_20to22diff_reactable
+
+```
+
+### Counties
+
+
+```{r, echo=FALSE}
+
+selected_columns_counties_OPEB_20to22diff_subset <- c("name", "state.abb", "nominal_difference_OPEB20to22", "percent_difference_OPEB20to22","net_opeb_liability")
+counties_OPEB_20to22diff_subset <- counties_NPL_20to22diff_OPEB_filter[selected_columns_counties_OPEB_20to22diff_subset]
+
+counties_OPEB_20to22diff_reactable <- reactable(
+  counties_OPEB_20to22diff_subset,
+  columns = list(
+    name = colDef(name = "County"),
+    state.abb = colDef(name = "State"),
+    nominal_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability $ Difference 20->22",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    percent_difference_OPEB20to22 = colDef(
+      name = "Net OPEB Liability % Difference 20->22",
+      cell = function(value) sprintf("%.2f %%", value)), # Changed here
+    net_opeb_liability = colDef(
+      name = "Net OPEB Liability in 2022",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+counties_OPEB_20to22diff_reactable
+
+```
+
+
+
+
+# The Governmental Units
+
+## States
+
+
+```{r, echo=FALSE}
+
+ggplot(States_Total_NPL, aes(x = year, y = TotalNPL)) + 
+  geom_col(fill = "#7CA825") +
+  geom_text(aes(label = paste0(dollar_format()(TotalNPL / 1000000000), " B")),
+            position = position_stack(vjust = 0.5), color = "black", size = 3) +
+  labs(title = "Top 100 States Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = function(x) paste0(dollar_format(scale = 1/1000000000)(x), "B")) +
+  theme_reason() +
+  theme(legend.title = element_blank())
+
+
+```
+
+```{r, echo=FALSE}
+
+States_Total_NPLchange %>%
+  select(year, TotalNPL, change_NPL) %>%
+  mutate(
+    TotalNPL = scales::dollar_format(prefix = "$", accuracy = 0.01)(TotalNPL),
+    change_NPL = scales::percent_format(accuracy = 0.01)((change_NPL / 100))
+  ) %>%
+  kable(format = "html", col.names = c("", "", "")) %>%
+  kable_styling() %>%
+  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+
+
+``` 
+ 
+ 
+### The States in 2022
+```{r, echo=FALSE}
+selected_columns <- c("name", "net_pension_liability", "npl_per_capita", "net_opeb_liability", "revenues")
+
+subset_states3y <- States3y %>%
+  filter(year == 2022) %>%
+  select(all_of(selected_columns))
+
+reactable(
+  data = subset_states3y,
+  filterable = TRUE,
+  defaultSorted = list(net_pension_liability = "desc"),
+  columns = list(
+    name = colDef(name = "State"),
+    net_pension_liability = colDef(name = "Net Pension Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    npl_per_capita = colDef(name = "Net Pension Liability Per Capita", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    net_opeb_liability = colDef(name = "Net OPEB Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    revenues = colDef(name = "Revenues", cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+
+```
+
+
+### Top 10 States by Liabilities 2022
+```{r, echo=FALSE}
+top_states_2022 <- States3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(net_pension_liability)) %>%
+  slice(1:10) %>%
+  select("State" = state.name,"Net Pension Liability" = net_pension_liability,"Per Capita" = npl_per_capita)
+ 
+top_states_2022 <- top_states_2022 %>%
+  mutate_at(vars("Net Pension Liability", "Per Capita"), scales::dollar)
+
+ 
+html_table <- top_states_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+
+html_table
+
+```
+
+
+### Top 10 States by Per Capita Liabilities 2022
+```{r, echo=FALSE}
+
+top_states_PC_2022 <- States3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(npl_per_capita)) %>%
+  slice(1:10) %>%
+  select("State" = state.name,"Per Capita NPL" = npl_per_capita, "Total NPL" = net_pension_liability,)
+ 
+top_states_PC_2022 <- top_states_PC_2022 %>%
+  mutate_at(vars("Per Capita NPL", "Total NPL"), scales::dollar)
+
+ 
+html_table <- top_states_PC_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+
+html_table
+
+```
+
+
+## Cities
+
+```{r, echo=FALSE}
+
+ggplot(Cities_Total_NPL, aes(x = year, y = TotalNPL)) + 
+  geom_col(fill = "#F27E52") +
+  geom_text(aes(label = paste0(dollar_format()(TotalNPL / 1000000000), "B")),
+            position = position_stack(vjust = 0.5), color = "black", size = 3) +
+  labs(title = "Top 100 States Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = function(x) paste0(dollar_format(scale = 1/1000000000)(x), "B")) +
+  theme_reason() +
+  theme(legend.title = element_blank())
+
+
+```
+
+```{r, echo=FALSE}
+
+Cities_Total_NPLchange %>%
+  select(year, TotalNPL, change_NPL) %>%
+  mutate(
+    TotalNPL = scales::dollar_format(prefix = "$", accuracy = 0.01)(TotalNPL),
+    change_NPL = scales::percent_format(accuracy = 0.01)((change_NPL / 100))
+  ) %>%
+  kable(format = "html", col.names = c("", "", "")) %>%
+  kable_styling() %>%
+  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+
+
+``` 
+
+
+
+### The Cities in 2022
+```{r, echo=FALSE}
+
+subset_cities3y <- Cities3y %>%
+  filter(year == 2022) %>%
+  select(c("name", "state.abb", "net_pension_liability", "npl_per_capita", "net_opeb_liability", "revenues","population"))
+
+
+
+reactable(
+  data = subset_cities3y,
+  filterable = TRUE,
+  defaultSorted = list(net_pension_liability = "desc"),
+  columns = list(
+    name = colDef(name = "City"),
+    state.abb = colDef(name = "State"),
+    population = colDef(name = "Population", cell = function(value) sprintf(format(value, big.mark = ","))),
+    net_pension_liability = colDef(name = "Net Pension Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    npl_per_capita = colDef(name = "Net Pension Liability Per Capita", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    net_opeb_liability = colDef(name = "Net OPEB Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    revenues = colDef(name = "Revenues", cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+```
+
+
+### Top 10 Cities by Liabilities 2022
+```{r, echo=FALSE}
+
+top_cities_2022 <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(net_pension_liability)) %>%
+  slice(1:10) %>%
+  select("City" = name, "State" = state.abb,"Net Pension Liability" = net_pension_liability,"Per Capita" = npl_per_capita)
+ 
+top_cities_2022 <- top_cities_2022 %>%
+  mutate_at(vars("Net Pension Liability", "Per Capita"), scales::dollar)
+
+ 
+html_table <- top_cities_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+
+html_table
+
+```
+
+
+#### Top 10 Cities by Per Capita Liabilities 2022
+```{r, echo=FALSE}
+
+top_cities_PC_2022 <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(npl_per_capita)) %>%
+  slice(1:10) %>%
+  select("City" = name, "State" = state.abb,"Per Capita NPL" = npl_per_capita,"Total NPL" = net_pension_liability)
+ 
+top_cities_PC_2022 <- top_cities_PC_2022 %>%
+  mutate_at(vars("Total NPL", "Per Capita NPL"), scales::dollar)
+
+ 
+html_table <- top_cities_PC_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+
+html_table
+
+```
+
+## Counties
+```{r, echo=FALSE}
+
+ggplot(Counties_Total_NPL, aes(x = year, y = TotalNPL)) + 
+  geom_col(fill = "#EBBE5C") +
+  geom_text(aes(label = paste0(dollar_format()(TotalNPL / 1000000000), "B")),
+            position = position_stack(vjust = 0.5), color = "black", size = 3) +
+  labs(title = "Top 100 States Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = function(x) paste0(dollar_format(scale = 1/1000000000)(x), "B")) +
+  theme_reason() +
+  theme(legend.title = element_blank())
+
+
+```
+
+```{r, echo=FALSE}
+
+Counties_Total_NPLchange %>%
+  select(year, TotalNPL, change_NPL) %>%
+  mutate(
+    TotalNPL = scales::dollar_format(prefix = "$", accuracy = 0.01)(TotalNPL),
+    change_NPL = scales::percent_format(accuracy = 0.01)((change_NPL / 100))
+  ) %>%
+  kable(format = "html", col.names = c("", "", "")) %>%
+  kable_styling() %>%
+  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+
+
+``` 
+
+
+
+
+#### The Counties in 2022
+```{r, echo=FALSE}
+
+subset_counties3y <- Counties3y %>%
+  filter(year == 2022) %>%
+  select(c("name", "state.abb", "net_pension_liability", "npl_per_capita", "net_opeb_liability", "revenues"))
+
+reactable(
+  data = subset_counties3y,
+  filterable = TRUE,
+  defaultSorted = list(net_pension_liability = "desc"),
+  columns = list(
+    name = colDef(name = "County"),
+    state.abb = colDef(name = "State"),
+    net_pension_liability = colDef(name = "Net Pension Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    npl_per_capita = colDef(name = "Net Pension Liability Per Capita", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    net_opeb_liability = colDef(name = "Net OPEB Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    revenues = colDef(name = "Revenues", cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+```
+
+### Top 10 Counties by Net Pension Liabilities 2022
+```{r, echo=FALSE}
+top_counties_2022 <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(net_pension_liability)) %>%
+  slice(1:10) %>%
+  select("County" = name, "State" = state.abb,"Net Pension Liability" = net_pension_liability,"Per Capita" = npl_per_capita)
+ 
+top_counties_2022 <- top_counties_2022 %>%
+  mutate_at(vars("Net Pension Liability", "Per Capita"), scales::dollar)
+
+ 
+html_table <- top_counties_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+
+html_table
+
+```
+
+### Top 10 County by Per Capita Liabilities in 2022
+```{r, echo=FALSE}
+top_counties_PC_2022 <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(npl_per_capita)) %>%
+  slice(1:10) %>%
+   select("County" = name, "State" = state.abb,"Per Capita" = npl_per_capita, "Total NPL" = net_pension_liability)
+ 
+top_counties_PC_2022 <- top_counties_PC_2022 %>%
+  mutate_at(vars("Total NPL", "Per Capita"), scales::dollar)
+
+ 
+html_table <- top_counties_PC_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+
+html_table
+```
+
+
+## School Districts
+
+```{r, echo=FALSE}
+
+ggplot(SD_Total_NPL, aes(x = year, y = TotalNPL)) + 
+  geom_col(fill = "#4B8CC7") +
+  geom_text(aes(label = paste0(dollar_format()(TotalNPL / 1000000000), "B")),
+            position = position_stack(vjust = 0.5), color = "black", size = 3) +
+  labs(title = "Top 100 States Net Pension Liability 2020 - 2022", x = "Year", y = "Total Unfunded Liability") +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = function(x) paste0(dollar_format(scale = 1/1000000000)(x), "B")) +
+  theme_reason() +
+  theme(legend.title = element_blank())
+
+
+```
+
+```{r, echo=FALSE}
+
+SD_Total_NPLchange %>%
+  select(year, TotalNPL, change_NPL) %>%
+  mutate(
+    TotalNPL = scales::dollar_format(prefix = "$", accuracy = 0.01)(TotalNPL),
+    change_NPL = scales::percent_format(accuracy = 0.01)((change_NPL / 100))
+  ) %>%
+  kable(format = "html", col.names = c("", "", "")) %>%
+  kable_styling() %>%
+  add_header_above(c("State Total Net Pension Liability" = 3), escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+
+
+``` 
+
+### The School Districts in 2022
+```{r, echo=FALSE}
+
+subset_SD3y <- SD3y %>%
+  filter(year == 2022) %>%
+  select(c("name", "state.abb", "net_pension_liability", "npl_per_student", "net_opeb_liability", "revenues"))
+
+reactable(
+  data = subset_SD3y,
+  filterable = TRUE,
+  defaultSorted = list(net_pension_liability = "desc"),
+  columns = list(
+    name = colDef(name = "School District"),
+    state.abb = colDef(name = "State"),
+    net_pension_liability = colDef(name = "Net Pension Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    npl_per_student = colDef(name = "Net Pension Liability Per Student", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    net_opeb_liability = colDef(name = "Net OPEB Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    revenues = colDef(name = "Revenues", cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+```
+
+### Top 10 School Districts by Liabilities 2022
+```{r, echo=FALSE}
+top_SD_2022 <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(net_pension_liability)) %>%
+  slice(1:10) %>%
+  select("County" = name, "State" = state.abb,"Net Pension Liability" = net_pension_liability,"Per Student" = npl_per_student)
+ 
+top_SD_2022 <- top_SD_2022 %>%
+  mutate_at(vars("Net Pension Liability", "Per Student"), scales::dollar)
+
+ 
+html_table <- top_SD_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+html_table
+```
+
+### Top 10 School Districts by Per Student Liabilities in 2022
+```{r, echo=FALSE}
+top_PS_SD_2022 <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(npl_per_student)) %>%
+  slice(1:10) %>%
+  select("County" = name, "State" = state.abb,"Per Student Net Pension Liability" = npl_per_student,"Total NPL" = net_pension_liability,)
+ 
+top_PS_SD_2022 <- top_PS_SD_2022 %>%
+  mutate_at(vars("Per Student Net Pension Liability", "Total NPL"), scales::dollar)
+
+ 
+html_table <- top_SD_2022 %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+html_table
+```
+
+
+
+

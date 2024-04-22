@@ -1,0 +1,452 @@
+---
+title: "Findings from the ACFR Dataset"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    number_sections: true
+
+author: "Mariana F Trujillo"
+date: "April 2024"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)
+library(rio)
+library(ggridges)
+library(ggpattern)
+library(ggdist)
+library(ggbeeswarm)
+library(ggstream)
+library(ggpubr)
+library(scales)
+library(knitr)
+library(reactable)
+library(htmltools)
+library(zoo)
+library(quantmod)
+library(PerformanceAnalytics)
+library(quadprog)
+library(janitor)
+library(kableExtra)
+library(patchwork)
+library(showtext)
+library(RColorBrewer)
+
+States3y <- read.csv("all_states_3years.csv")
+Cities3y <- read.csv("top100_cities_3years.csv")
+Counties3y <- read.csv("top100_counties_3years.csv")
+SD3y <- read.csv("top100_sd_3years.csv")
+
+source("APR functions.R")
+source("Reason theme.R")
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  fig.align = "center",
+  cache = FALSE
+)
+```
+
+```{r, echo=FALSE}
+#Add per capita
+States3y <- States3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+Cities3y  <- Cities3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+Counties3y <- Counties3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+SD3y <- SD3y %>%
+  mutate(npl_per_student= net_pension_liability / students) 
+
+```
+
+```{r, echo=FALSE}
+
+Combined3y <- bind_rows(
+  mutate(States3y, dataset = "States"),
+  mutate(Cities3y, dataset = "Cities"),
+  mutate(Counties3y, dataset = "Counties"),
+  mutate(SD3y, dataset = "School Districts")
+)
+
+total_unfunded_liabilities <- Combined3y %>%
+  group_by(year, dataset) %>%
+  summarise(total_unfunded_liabilities = sum(net_pension_liability, na.rm = TRUE), .groups = "drop")
+
+total_unfunded_liabilities$dataset <- factor(total_unfunded_liabilities$dataset, levels = c("States", "Cities", "Counties", "School Districts"))
+
+options(repr.plot.width = 10, repr.plot.height = 6)
+
+```
+
+``` {r, echo=FALSE}
+States_Total_NPL <- States3y %>%
+  group_by(year) %>%
+  summarise(net_opeb_liability = sum(net_opeb_liability, na.rm = TRUE),
+            net_pension_liability = sum(net_pension_liability, na.rm = TRUE))
+
+States_Total_NPL_change <- States_Total_NPL %>%
+  mutate(rate_of_change = (net_opeb_liability - lag(net_opeb_liability)) / lag(net_opeb_liability) * 100)
+
+
+SD_Total_NPL <- SD3y %>%
+  group_by(year) %>%
+  summarise(net_opeb_liability = sum(net_opeb_liability, na.rm = TRUE),
+            net_pension_liability = sum(net_pension_liability, na.rm = TRUE))
+
+SD_Total_NPL_change <- SD_Total_NPL %>%
+  mutate(rate_of_change_opeb = (net_opeb_liability - lag(net_opeb_liability)) / lag(net_opeb_liability) * 100)
+
+
+Cities_Total_NPL <- Cities3y %>%
+  group_by(year) %>%
+  summarise(net_opeb_liability = sum(net_opeb_liability, na.rm = TRUE),
+            net_pension_liability = sum(net_pension_liability, na.rm = TRUE))
+
+Cities_Total_NPLchange <- Cities_Total_NPL %>%
+  mutate(rate_of_change_opeb = (net_opeb_liability - lag(net_opeb_liability)) / lag(net_opeb_liability) * 100)
+
+
+Counties_Total_NPL <- Counties3y %>%
+  group_by(year) %>%
+  summarise(net_opeb_liability = sum(net_opeb_liability, na.rm = TRUE),
+            net_pension_liability = sum(net_pension_liability, na.rm = TRUE))
+
+Counties_Total_NPLchange <- Counties_Total_NPL %>%
+  mutate(rate_of_change_opeb = (net_opeb_liability - lag(net_opeb_liability)) / lag(net_opeb_liability) * 100)
+
+combined_change_data <- bind_rows(
+  States_Total_NPL_change %>% mutate(Location = "State"),
+  SD_Total_NPL_change %>% mutate(Location = "SD"),
+  Cities_Total_NPLchange %>% mutate(Location = "City"),
+  Counties_Total_NPLchange %>% mutate(Location = "County")
+) %>%
+select(rate_of_change_opeb, Location, year, net_opeb_liability, net_pension_liability)
+
+orange_colors <- brewer.pal(3, "YlOrBr")
+
+
+```
+
+```{r, echo=FALSE}
+States3y <- States3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+Cities3y  <- Cities3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+Counties3y <- Counties3y %>%
+  mutate(npl_per_capita = net_pension_liability / population) 
+
+SD3y <- SD3y %>%
+  mutate(npl_per_student= net_pension_liability / students) 
+
+```
+
+# Trends
+
+## Unfunded Liabilities 
+
+
+```{r, echo=FALSE}
+
+States3y_sorted <- States3y %>%
+  arrange(name, year)
+
+States_NPL_20to22diff <- States3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+Cities3y_sorted <- Cities3y %>%
+  arrange(name, year)
+
+Cities_NPL_20to22diff <- Cities3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+Counties3y_sorted <- Counties3y %>%
+  arrange(name, year)
+
+Counties_NPL_20to22diff <- Counties3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+SD3y_sorted <- SD3y %>%
+  arrange(name, year)
+
+SD_NPL_20to22diff <- SD3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+
+```
+
+
+```{r, echo=FALSE}
+
+total_OPEB_liabilities <- Combined3y %>%
+  group_by(dataset, year) %>%
+  summarise(total_OPEB_liabilities = sum(net_opeb_liability, na.rm = TRUE), .groups = "drop")
+
+total_OPEB_liabilities <- total_OPEB_liabilities %>%
+  group_by(dataset) %>%
+  summarise(
+    first_total_OPEB = first(total_OPEB_liabilities),
+    last_total_OPEB = last(total_OPEB_liabilities),
+    OPEB_nominal_difference_NPL20to22 = last_total_OPEB - first_total_OPEB,
+    OPEB_percent_difference_NPL20to22 = ((last_total_OPEB - first_total_OPEB) / first_total_OPEB) * 100,
+    OPEB_nominal_difference_L20to22 = last_total_OPEB - first_total_OPEB,
+    OPEB_percent_difference_L20to22 = ((last_total_OPEB - first_total_OPEB) / first_total_OPEB) * 100,
+    .groups = "drop")
+
+
+```
+
+```{r, echo=FALSE}
+
+Combined3y <- bind_rows(
+  mutate(States3y, dataset = "States"),
+  mutate(Cities3y, dataset = "Cities"),
+  mutate(Counties3y, dataset = "Counties"),
+  mutate(SD3y, dataset = "School Districts")
+)
+
+total_OPEB_liabilities <- Combined3y %>%
+  group_by(dataset, year) %>%
+  summarise(total_OPEB_liabilities = sum(net_opeb_liability, na.rm = TRUE), .groups = "drop")
+
+total_OPEB_liabilities <- total_OPEB_liabilities %>%
+  group_by(dataset) %>%
+  summarise(
+    first_total_OPEB = first(total_OPEB_liabilities),
+    last_total_OPEB = last(total_OPEB_liabilities),
+    OPEB_nominal_difference_NPL20to22 = last_total_OPEB - first_total_OPEB,
+    OPEB_percent_difference_NPL20to22 = ((last_total_OPEB - first_total_OPEB) / first_total_OPEB) * 100,
+    OPEB_nominal_difference_L20to22 = last_total_OPEB - first_total_OPEB,
+    OPEB_percent_difference_L20to22 = ((last_total_OPEB - first_total_OPEB) / first_total_OPEB) * 100,
+    .groups = "drop")
+
+
+```
+
+
+```{r, echo=FALSE}
+combined_change_data %>%
+  ggplot(aes(x = Location, y = net_opeb_liability, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = scales::dollar(net_opeb_liability)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE,
+            hjust = -0.2) +  # Adjust position to sit outside the graph
+  labs(
+    title = "Change in Unfunded OPEB Liabilities by Entity",
+    x = "Entity",
+    y = "Net OPEB Liability",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = orange_colors) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", scale = 1, accuracy = 2)) +  
+  coord_flip() +
+  theme_reason ()
+
+```
+
+```{r, echo=FALSE}
+combined_change_data %>%
+  ggplot(aes(x = Location, y = net_pension_liability, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = scales::dollar(net_opeb_liability)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE,
+            hjust = -0.2) +  # Adjust position to sit outside the graph
+  labs(
+    title = "Change in Unfunded Pension Liabilities by Entity",
+    x = "Entity",
+    y = "Net OPEB Liability",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = orange_colors) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", scale = 1, accuracy = 2)) +  
+  coord_flip() +
+  theme_reason ()
+
+```
+
+
+
+## OPEB Liabilities 
+
+
+### How West Virginia and Alaska abolished their Unfunded OPEB liability 
+
+
+``` {r, echo=FALSE}
+selected_columns <- c("name", "net_pension_liability", "npl_per_capita", "net_opeb_liability",  "revenues")
+
+subset_states3y <- States3y %>%
+  filter(year == 2022) %>%
+  filter(year == 2022 & name %in% c("west virginia", "alaska")) %>%
+  select(all_of(selected_columns))
+
+reactable(
+  data = subset_states3y,
+  filterable = FALSE,
+  defaultSorted = list(net_pension_liability = "desc"),
+  columns = list(
+    name = colDef(name = "State"),
+    net_pension_liability = colDef(name = "Net Pension Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    npl_per_capita = colDef(name = "Net Pension Liability Per Capita", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    net_opeb_liability = colDef(name = "Net OPEB Liability", cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    revenues = colDef(name = "Revenues", cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = FALSE
+)
+
+```
+
+West Virginia: Lump sump legislature comtributions 
+-The state reserved  enough money aside and slowly paid off their net OPEB liabilities.  
+-Senate Bill No. 419 mandating contributions
+-Net OPEB asset of $23,841,000
+
+Alaska: Pension ADEC
+-Alaska has actuarially determined OPEB employee contribution rate.
+-A set statutory employer contribution rate (Alaska, 12%), and any difference between the actuarially determined contribution rate and the statutory employer effective rate is paid by the State. In 2022 the difference was of 1% of payroll.
+-Net OPEB assets of $1B in 2023 !
+
+
+### The general fall in OPEB liabilities 
+
+
+
+```{r, echo=FALSE}
+
+States3y_sorted <- States3y %>%
+  arrange(name, year)
+
+States_NPL_20to22diff <- States3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+Cities3y_sorted <- Cities3y %>%
+  arrange(name, year)
+
+Cities_NPL_20to22diff <- Cities3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+Counties3y_sorted <- Counties3y %>%
+  arrange(name, year)
+
+Counties_NPL_20to22diff <- Counties3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+SD3y_sorted <- SD3y %>%
+  arrange(name, year)
+
+SD_NPL_20to22diff <- SD3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    OPEB_nominal_difference_NPL20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_NPL20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100,
+    OPEB_nominal_difference_L20to22 = last(net_opeb_liability) - first(net_opeb_liability),
+    OPEB_percent_difference_L20to22 = (last(net_opeb_liability) - first(net_opeb_liability)) / first(net_opeb_liability) * 100 )
+
+
+```
+
+
+
+```{r, echo=FALSE}
+combined_change_data %>%
+  ggplot(aes(x = Location, y = net_opeb_liability, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = scales::dollar(net_opeb_liability)), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE,
+            hjust = -0.2) +  # Adjust position to sit outside the graph
+  labs(
+    title = "Change in Unfunded Liabilities by Entity",
+    x = "Entity",
+    y = "Net OPEB Liability",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = orange_colors) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", scale = 1, accuracy = 2)) +  
+  coord_flip() +
+  theme_reason ()
+
+```
+
+```{r, echo=FALSE}
+
+selected_total_OPEB_liabilities <- total_OPEB_liabilities %>%
+  select(dataset, OPEB_nominal_difference_L20to22, OPEB_percent_difference_L20to22, last_total_OPEB) %>%
+  mutate(
+    OPEB_nominal_difference_L20to22 = dollar(OPEB_nominal_difference_L20to22),
+    OPEB_percent_difference_L20to22 = percent(OPEB_percent_difference_L20to22 / 100, accuracy = 0.01),
+    last_total_OPEB = dollar(last_total_OPEB)
+  )
+
+
+kable(selected_total_OPEB_liabilities, 
+      col.names = c("Entuty","$ Difference 20-22", "% Difference 20-22", "2022 Unfunded OPEB Liabilities"), 
+      caption = "Change in Total OPEB Unfunded Liabilities by Entity", 
+      format = "html") %>%  
+  kable_styling(full_width = FALSE)
+
+```
+
+
+# Case Studies
+
+
+
+
+

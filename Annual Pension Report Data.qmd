@@ -1,0 +1,1125 @@
+---
+title: "Annual Pension Report Data"
+format:
+  html:
+    toc: true 
+    self-contained: true
+    css: style.css
+editor: visual
+execute: 
+  echo: false
+  cache: false
+---
+
+```{r}
+#| include: false
+library(tidyverse)
+library(rio)
+library(ggridges)
+library(ggpattern)
+library(ggdist)
+library(ggbeeswarm)
+library(ggstream)
+library(ggpubr)
+library(scales)
+library(knitr)
+library(reactable)
+library(htmltools)
+library(zoo)
+library(quantmod)
+library(PerformanceAnalytics)
+library(quadprog)
+library(janitor)
+```
+
+```{r}
+#| include: false  
+#Import data and functions
+ppd <- import("ppd-jan-2024.csv")
+#Source external functions (may need to use local = knit_global() for this to work)
+source("APR functions.R")
+source("Pension projection functions.R")
+source("Reason theme.R")
+```
+
+```{r}
+#clean and process data
+ppd_clean <- ppd %>% 
+  filter(fy > 2000) %>% 
+  mutate(PlanFullName = gsub("\x92", "'", PlanFullName),    #clean plan names and full names
+         PlanName = gsub("\x92", "'", PlanName)) %>% 
+select(fy, fye, PlanName, PlanFullName, StateName, AdministeringGovt, ActLiabilities_GASB, MktAssets_net, ActAssets_GASB, TotalPensionLiability, InvestmentReturnAssumption_GASB, InvestmentReturn_1yr, payroll, PayrollGrowthAssumption, NormCostRate_tot, ReqContRate_tot, ReqContRate_tot_Stat, expense_TotBenefits, contains("Total_Rtrn"), contains("Total_Actl")) %>% 
+  
+  rename(plan_name = PlanName,
+         plan_full_name = PlanFullName,
+         state = StateName,       
+         gov_type = AdministeringGovt,
+         aal = ActLiabilities_GASB,
+         mva = MktAssets_net,
+         ava = ActAssets_GASB,
+         arr = InvestmentReturnAssumption_GASB,
+         return = InvestmentReturn_1yr,
+         payroll_growth = PayrollGrowthAssumption,
+         nc = NormCostRate_tot,
+         cont_rate = ReqContRate_tot,
+         ben_pay = expense_TotBenefits) %>% 
+  group_by(plan_name) %>% 
+  mutate(fye = ymd(fye),
+         #fill missing years
+         fye = fye_f(fye),
+         #shift fye to last day of the previous month if fye is the first day of the month
+         fye = if_else(day(fye) == 1, fye - days(1), fye)) %>% 
+  ungroup()
+
+#add missing mva data for Hawaii and Wisconsin (revise this when new data set is available)
+ppd_clean[ppd_clean$plan_name == "Wisconsin RS" & ppd_clean$fy == 2022,"mva"] <- 118366400
+
+
+#Get key metrics/variables
+ppd_clean <- ppd_clean %>%   
+  mutate(gov_type2 = ifelse(gov_type == 0, "State Plans", "Local Plans"),
+         #calculate funding status
+         ual_mva = aal - mva,
+         ual_ava = aal - ava, 
+         funded_ratio_mva = mva / aal,
+         funded_ratio_ava = ava / aal,
+         #get fye's month and day
+         # month = as.factor(month(fye)), 
+         # day = as.factor(day(fye))
+         month = month(fye),
+         day = day(fye),
+         )
+
+
+```
+
+## Funding Health
+
+### Overview
+
+```{r}
+plan_type_count <- ppd_clean %>% 
+  group_by(gov_type) %>% 
+  summarise(plan_count = n_distinct(plan_name))
+
+state_plan_count = plan_type_count$plan_count[plan_type_count$gov_type == 0]
+
+local_plan_count = sum(plan_type_count$plan_count) - state_plan_count
+```
+
+Below is the national funding status over time, based on our sample of `r n_distinct(ppd_clean$plan_name)` public pension plans. Among these, `r state_plan_count` are state administered plans and `r local_plan_count` are local plans.
+
+```{r}
+#| warning: false
+#| label: fig-national_ual
+#| fig-cap: "National Unfunded Liability Over Time"
+funding_national2 <- ppd_clean %>% 
+  group_by(fy) %>% 
+  summarise(national_mva = sum(mva, na.rm = T),
+            national_aal = sum(aal, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(national_ual_mva = national_aal - national_mva,
+         national_funded_ratio_mva = national_mva / national_aal)
+
+
+funding_national <- ppd_clean %>% 
+  group_by(fy) %>% 
+  summarize(national_ual_mva = sum(ual_mva, na.rm = T),
+            national_ual_ava = sum(ual_ava, na.rm = T),
+            national_funded_ratio_mva = sum(mva, na.rm = T) / sum(aal, na.rm = T),
+            national_funded_ratio_ava = sum(ava, na.rm = T) / sum(aal, na.rm = T))
+
+funding_national_long <- funding_national %>% 
+  pivot_longer(cols = -fy,
+               names_to = c(".value", "type"),
+               names_pattern = "national_(.*?)_(ava|mva)")
+
+ggplot(funding_national_long, aes(x = fy, y = ual, fill = type)) + 
+  geom_col(position = "dodge2") +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = dollar_format(scale = 1/1000000000, suffix = "T")) +
+  scale_fill_manual(labels = c("Based on AVA", "Based on MVA"),
+                      values = c("#3399cc", "#FF6633")) +
+  labs(x = NULL, y = "Unfunded Liability") +
+  theme_reason() +
+  theme(legend.title = element_blank())
+```
+
+```{r}
+#| warning: false
+#| label: fig-national_funded_ratio
+#| fig-cap: "National Funded Ratio Over Time"
+
+ggplot(funding_national_long, aes(x = fy, y = funded_ratio, col = type)) +
+  geom_line(linewidth = 1) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = percent_format()) +
+  scale_color_manual(labels = c("Based on AVA", "Based on MVA"),
+                       values = c("#3399cc", "#FF6633")) +
+  labs(x = NULL, y = "Funded Ratio") +
+  theme_reason() +
+  theme(legend.title = element_blank())
+```
+
+Let's break down the MVA-based UAL to see how the pension debt is divided among state and local plans over time:
+
+```{r}
+#| warning: false
+#| label: fig-national-ual-breakdown
+#| fig-cap: "National Unfunded Liability Breakdown" 
+funding_national_breakdown <- ppd_clean %>% 
+  group_by(fy, gov_type2) %>% 
+  summarise(ual_mva = sum(ual_mva, na.rm = T))
+
+ggplot(funding_national_breakdown, aes(x = fy, y = ual_mva)) +
+  geom_col_pattern(aes(pattern = gov_type2), position = "stack", 
+                   fill = "#FF6633", pattern_spacing = 0.02, 
+                   pattern_color = "white",
+                   pattern_fill = "white") +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = dollar_format(scale = 1/1000000000, suffix = "T")) +
+  labs(x = NULL, y = "Unfunded Liability - based on MVA",
+       pattern = NULL) +
+  scale_pattern_manual(values = c("Local Plans" = "stripe", "State Plans" = "none")) +
+  theme_reason()
+```
+
+### Distribution of Funding Status
+
+Here's how the funding ratio distribution moved over the last 20 years
+
+```{r}
+#| warning: false
+#| label: fig-funded-ratio-dist-over-time
+#| fig-cap: "Distribution of Funded Ratios Over Time" 
+ggplot(ppd_clean %>% filter(funded_ratio_mva > 0, funded_ratio_mva < 2), aes(x = fy)) + 
+  stat_slab(aes(y = funded_ratio_mva), scale = 0.9, fill = "#FF6633",
+            alpha = 0.4) +
+  stat_interval(aes(y = funded_ratio_mva), linewidth = 1.2) +
+  geom_line(data = funding_national, aes(y = national_funded_ratio_mva), linewidth = 0.2, linetype = "dashed") +
+  geom_point(data = funding_national, aes(y = national_funded_ratio_mva)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 10),
+                     labels = percent_format()) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  coord_cartesian(xlim = c(2001, 2022)) +
+  labs(x = NULL, y = NULL, col = "Interval") +
+  theme_reason() 
+```
+
+Now, let's zoom in 2022 and see the funded ratio distribution:
+
+```{r}
+#| warning: false
+#| label: fig-funding-ratio-dist-2022
+#| fig-cap: "Funded Ratio Distribution - 2022"
+ppd_clean_2022 <- ppd_clean %>% 
+  filter(fy == 2022)
+
+ggplot(ppd_clean_2022, aes(x = funded_ratio_mva)) +
+  geom_dots(aes(fill = gov_type2, group = NA, 
+                order = factor(gov_type2, levels = c("State Plans", "Local Plans"))),
+            linewidth = 0,
+            layout = "hex") +
+  scale_x_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(n = 10)) +
+  scale_fill_manual(values = c("#3399cc", "#FF6633")) +
+  labs(x = "Funded Ratio - Based on MVA", fill = NULL) +
+  theme_reason() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank())
+```
+
+### Ranking Plans Based on Funding Status
+
+The interactive table below shows all the pension plans in our sample from the best funded plans to the worst funded ones in FY2022. You can sort the table based on any column and search for any specific plan.
+
+```{r}
+#| column: screen-inset-shaded
+funding_plan_2022_table <- ppd_clean_2022 %>%
+  select(fy, plan_name, gov_type2, aal, mva, funded_ratio_mva) %>%
+  filter(!is.na(funded_ratio_mva)) %>%
+  arrange(desc(funded_ratio_mva))
+
+funding_table(data = funding_plan_2022_table)
+```
+
+Replicate the tables for state plans only / local plans only
+
+### State Level
+
+```{r}
+#| warning: false
+funding_state <- ppd_clean %>% 
+  filter(gov_type2 == "State Plans",
+         !is.na(mva),
+         !is.na(aal)) %>% 
+  group_by(fy, state) %>% 
+  summarize(state_ual_mva = sum(ual_mva, na.rm = T),
+            state_ual_ava = sum(ual_ava, na.rm = T),
+            state_funded_ratio_mva = sum(mva, na.rm = T) / sum(aal, na.rm = T),
+            state_funded_ratio_ava = sum(ava, na.rm = T) / sum(aal, na.rm = T)) %>% 
+  ungroup() %>% 
+  filter(state != "District of Columbia")
+
+#Note: inspect missing Tennessee data
+funding_state_2022 <- funding_state %>% 
+  filter(fy == 2022,
+         !is.na(state_funded_ratio_mva)) %>% 
+  #create a "perc" column for later chart labeling
+  mutate(perc = paste0(round(state_funded_ratio_mva*100), "%"))
+
+best_funded_state <- funding_state_2022[funding_state_2022$state_funded_ratio_mva == max(funding_state_2022$state_funded_ratio_mva),]
+
+worst_funded_state <- funding_state_2022[funding_state_2022$state_funded_ratio_mva == min(funding_state_2022$state_funded_ratio_mva),]
+
+median_funded_state <- funding_state_2022[funding_state_2022$state_funded_ratio_mva == quantile(funding_state_2022$state_funded_ratio_mva, probs = 0.5, type = 1),]
+```
+
+On the aggregate level for state pension, the best funded state is `r best_funded_state %>% pull(state)` with a funded ratio of `r percent(best_funded_state %>% pull(state_funded_ratio_mva))`, and the worst funded state is `r worst_funded_state %>% pull(state)` with a funded ratio of `r percent(worst_funded_state %>% pull(state_funded_ratio_mva))`. The median state is `r median_funded_state %>% pull(state)` with a funded ratio of `r percent(median_funded_state %>% pull(state_funded_ratio_mva))`.
+
+```{r}
+#| warning: false
+#| fig-height: 11
+#| label: fig-state-funded-ratio-2022
+#| fig-cap: "State Funded Ratio - 2022"
+
+ggplot(funding_state_2022, aes(x = reorder(state, state_funded_ratio_mva), y = state_funded_ratio_mva)) +
+  geom_col(fill = "#FF6633") +
+  geom_text(aes(label = perc),
+            hjust = 1,
+            nudge_y = -0.02,
+            size = 3.5,
+            col = "white") +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10),
+                     guide = guide_axis(angle = 90),
+                     expand = c(0,0)) +
+  labs(x = NULL, y = "Funded Ratio - MVA (2022)") +
+  coord_flip() +
+  theme_reason() +
+  theme(panel.grid.major.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.y = element_text(hjust = 1))
+```
+
+A variable width bar chart (with the width of the bar chart representing the size of each state's accrued liability) could be a great visualization to show states' funding status and their relative sizes simultaneously (Jen)
+
+## Investment Performance
+
+### Overview
+
+First, let's look at the annual returns at the aggregate/national level.
+
+```{r}
+#| warning: false
+#| label: fig-national-returns
+#| fig-cap: "National Public Pension Returns"
+return_national <- ppd_clean %>% 
+  filter(!is.na(mva)) %>% 
+  group_by(fy) %>% 
+  summarise(national_return = weighted.mean(return, w = mva, na.rm = T),
+            national_ARR = weighted.mean(arr, w = mva, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(avg_return = prod(1 + national_return)^(1/n()) - 1)
+
+return_national_2022 <- return_national %>% 
+  filter(fy == 2022)
+
+ggplot(return_national, aes(x = fy, y = national_return)) +
+  geom_line(col = "#FF6633", linewidth = 1) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  labs(x = NULL, y = "National Investment Returns") +
+  theme_reason()
+```
+
+In 2022, public pension plans in our sample earned an aggregate return of `r label_percent(accuracy = 0.01)(return_national_2022 %>% pull(national_return))`.
+
+### Investment Performance and FY End Months
+
+One issue with calculating aggregate returns like this is not all plans have the same fiscal year ends. @fig-fiscal-year-end-month-distribution shows that most plans concentrate around June and December, with a small number of plans end their fiscal years in March, April, August, and September.
+
+```{r}
+#| warning: false
+#| label: fig-fiscal-year-end-month-distribution
+#| fig-cap: "Distribution of Public Plans Based on Fiscal Year End Months"
+ggplot(ppd_clean_2022, aes(x = as.factor(month))) +
+  geom_bar(fill = "#FF6633") +
+  labs(x = "FY End Months", y = "Plan Count") +
+  theme_reason()
+```
+
+@fig-national-returns-by-fye visualizes the aggregate pension returns by fiscal year end months. You can see that the return differences among these groups can be significant.
+
+```{r}
+#| warning: false
+#| label: fig-national-returns-by-fye
+#| fig-cap: "National Public Pension Returns By FY End Months"
+
+return_national_fye <- ppd_clean %>% 
+  filter(!is.na(mva)) %>% 
+  group_by(month, fy) %>% 
+  summarise(national_return = weighted.mean(return, w = mva, na.rm = T),
+            national_ARR = weighted.mean(arr, w = mva, na.rm = T)) %>% 
+  ungroup() %>% 
+  group_by(month) %>% 
+  mutate(avg_return = prod(1 + national_return)^(1/n()) - 1) %>% 
+  ungroup()
+
+
+ggplot(return_national_fye, aes(x = fy, y = national_return)) +
+  geom_line(aes(col = as.factor(month), group = as.factor(month)), linewidth = 1) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  labs(x = NULL, y = "National Investment Returns", col = "FY End Months") +
+  theme_reason() 
+```
+
+Let's zoom in 2022 and see how plans' returns differed because of FY end months.
+
+```{r}
+#| warning: false
+#| label: fig-2022-returns-by-fye
+#| fig-cap: "Public Pension Returns Distribution By FY End Months"
+ggplot(ppd_clean_2022, aes(x = as.factor(month), y = return, slab_fill = as.factor(month))) +
+  stat_dotsinterval(slab_linewidth = 0, .width = c(0.5), show.legend = F) +
+  scale_y_continuous(breaks = pretty_breaks(10),
+                     labels = percent_format()) +
+  labs(x = "FY End Months", y = "2022 Returns") +
+  theme_reason()
+```
+
+The differences in one year are indeed significant. However, if we look at the average returns over the last 22 years, do FY end months matter?
+
+```{r}
+#| warning: false
+#| label: fig-22-year-avg-returns-by-fye
+#| fig-cap: "Public Pension Average Returns (22-Year) Distribution By FY End Months"
+
+return_plan_01_22 <- ppd_clean %>% 
+  group_by(plan_name) %>% 
+  summarise(avg_return = prod(1 + return)^(1 / n()) - 1,
+            month = getmode(month))
+
+ggplot(return_plan_01_22, aes(x = as.factor(month), y = avg_return, slab_fill = as.factor(month))) +
+         stat_dotsinterval(slab_linewidth = 0,
+                   side = "both", binwidth = 0.0012,.width = c(0.50),
+                   show.legend = F) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  labs(x = "FY End Months", y = "'01-'22 Average Returns") +
+  theme_reason()
+  
+```
+
+### Investment Performance and Assumed Rates of Returns
+
+Let's compare the 22-year average returns with the average assumed rates of return over the same period:
+
+```{r}
+#| warning: false
+#| label: fig-aggregate-avg-returns-vs-aggregate-arr
+#| fig-cap: "National Average Return (22-Year) vs. National Average ARR"
+
+return_national_long <- return_national %>% 
+  select(-national_return) %>% 
+  pivot_longer(cols = -fy, 
+               names_to = "type",
+               values_to = "value")
+
+ggplot(return_national_long, aes(x = fy, y = value, col = type)) +
+  geom_line(linewidth = 1) +
+  coord_cartesian(ylim = c(0.05, 0.09)) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  scale_color_discrete(labels = c("National Averge Return (22-Year)", "National Average ARR")) +
+  labs(x = NULL, y = NULL, col = NULL) +
+  theme_reason()
+
+```
+
+Let's compare the ARR against not just the 22-year average return but also rolling 5-year, 10-year, and 15-year returns.
+
+```{r}
+#| warning: false
+#| label: fig-aggregate-rolling-returns-vs-aggregate-arr
+#| fig-cap: "National Rolling Average Returns vs. National Average ARR"
+return_national <- return_national %>% 
+  mutate(rolling_5 = rolling_return(return_vec = national_return,
+                                    window = 5),
+         rolling_10 = rolling_return(return_vec = national_return,
+                                    window = 10),
+         rolling_15 = rolling_return(return_vec = national_return,
+                                    window = 15))
+
+return_national_long <- return_national %>% 
+  pivot_longer(cols = -fy, names_to = "type", values_to = "value")
+
+return_facet_label = c(avg_return = "22-Year Avg Returns",
+                       rolling_10 = "10-Year Rolling Avg Returns",
+                       rolling_15 = "15-Year Rolling Avg Returns",
+                       rolling_5 = "5-Year Rolling Avg Returns")
+
+
+ggplot(return_national_long %>% filter(!type %in% c("national_return", "national_ARR"))) +
+  geom_line(linewidth = 1, aes(x = fy, y = value, col = type), show.legend = F) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  facet_wrap(vars(type), labeller = as_labeller(return_facet_label)) +
+  geom_line(data = return_national_long %>% filter(type == "national_ARR") %>% 
+              select(-type),
+            aes(x = fy, y = value, linetype = "National Average Assumed Rate of Returns"),
+            alpha = 0.5, linewidth = 1) +
+  labs(y = NULL, x = NULL, col = NULL, linetype = NULL) +
+  theme_reason()
+```
+
+How about the distribution of plans' ARRs vs plans' average returns over the last 22 years?
+
+```{r}
+#| warning: false
+#| label: fig-avg-return-dist-vs-arr-dist
+#| fig-cap: "Average Returns (22-Year) Distribution vs. ARR Distribution"
+return_plan <- ppd_clean %>% 
+  group_by(plan_name) %>% 
+  mutate(mean_arr = mean(arr, na.rm = T),
+         latest_arr = last(arr, na_rm = T),
+         avg_return = prod(1 + return)^(1 / n()) - 1,
+         rolling_5 = rolling_return(return, 5),
+         rolling_10 = rolling_return(return, 10),
+         rolling_15 = rolling_return(return, 15)
+  ) %>% 
+  ungroup() %>% 
+  select(fy, fye, plan_name, plan_full_name, gov_type2, state,
+         aal, mva, funded_ratio_mva, arr, return,
+         mean_arr, latest_arr, avg_return,
+         rolling_5, rolling_10, rolling_15
+         )
+
+#Get 2022 return data only and filter out NA values for average returns
+return_plan_2022 <- return_plan %>% 
+  filter(fy == 2022,
+         !is.na(avg_return))
+
+#Convert to long format to compare 22-year returns distribution with ARR distributions
+return_plan_2022_long_1 <- return_plan_2022 %>% 
+  pivot_longer(cols = mean_arr:avg_return,
+               names_to = "type",
+               values_to = "value")
+
+ggplot(return_plan_2022_long_1, aes(x = value, fill = type)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(n = 10)) +
+  scale_fill_discrete(labels = c("22-Year Average Returns", "Latest ARR", "22-Year Average ARR")) +
+  labs(x = NULL, y = NULL, fill = NULL) +
+  theme_reason() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank())
+
+```
+
+How about adding the average returns over the last 15, 10, and 5 years to the mix?
+
+```{r}
+#| warning: false
+#| label: fig-avg-return-dist-vs-arr-dist-2
+#| fig-cap: "Average Returns Distribution (Varying Periods) vs. ARR Distribution"
+return_plan_2022_long_2 <- return_plan_2022 %>% 
+  pivot_longer(cols = avg_return:rolling_15,
+               names_to = "return_type",
+               values_to = "return_value")
+
+return_facet_label_2 = c(avg_return = "22-Year Avg Returns",
+                         rolling_10 = "10-Year Avg Returns",
+                         rolling_15 = "15-Year Avg Returns",
+                         rolling_5 = "5-Year Avg Returns")
+
+  
+ggplot(return_plan_2022_long_2) +
+  geom_density(aes(x = return_value, fill = return_type), alpha = 0.5, show.legend = F) +
+  scale_x_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  facet_wrap(vars(return_type), labeller = as_labeller(return_facet_label_2)) +
+  geom_density(aes(x = latest_arr, linetype = "Latest ARR"), fill = "gray", alpha = 0.5) +
+  labs(x = NULL, y = NULL, fill = NULL, linetype = NULL) +
+  theme_reason() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank())
+```
+
+Now, let's show the distribution of "Excess returns". Excess returns here are defined as the differences between the plans' actual average returns and their ARRs.
+
+```{r}
+#| warning: false
+#| label: fig-excess-return-dist
+#| fig-cap: "Excess Returns (22-Year) Distribution"
+return_plan_2022 <- return_plan_2022 %>% 
+  mutate(excess_return_mean_arr = avg_return - mean_arr,
+         excess_return_latest_arr = avg_return - latest_arr)
+
+
+plan_percent_excess_below_0 <- sum(return_plan_2022$excess_return_latest_arr < 0) / nrow(return_plan_2022)
+
+# ggplot(return_plan_2022, aes(x = excess_return_mean_arr)) +
+# stat_dots()
+
+ggplot(return_plan_2022, aes(x = excess_return_latest_arr)) +
+stat_dots(aes(fill = after_stat(x > 0)), linewidth = 0, show.legend = F) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_x_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(10)) +
+  labs(x = "Excess Returns (22-Year) Over Latest ARRs", y = NULL) +
+  theme_reason() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank())
+```
+
+@fig-excess-return-dist shows that `r label_percent(accuracy = 0.1)(plan_percent_excess_below_0)` of the public pension plans failed to beat their latest ARRs over the last 22 years.
+
+### Investment Performance Benchmarking
+
+First, let's see how public pension funds performed compared to the popular S&P500.
+
+```{r}
+#| warning: false
+#| label: fig-return-benchmarking-sp500
+#| fig-cap: "Investment Return Benchmarking (S&P500)"
+
+#Get benchmark functions and data
+source("Benchmark.R")
+
+#Join SP500 return data with the pension data
+
+benchmark_pension_sp500 <- function(benchmark_period, pension_data, index_data, end_fy, return_type = "cumulative") {
+  pension_data_sp500_benchmark <- pension_data %>% 
+    left_join(index_data %>% select(fy, month, sp500)) %>%
+    select(fy, plan_name, return, sp500) %>% 
+    filter(fy <= end_fy, fy >= end_fy - benchmark_period + 1) %>% 
+    #filter out plans that don't have returns every year for the whole period
+    group_by(plan_name) %>%
+    filter(all(!is.na(return))) %>% 
+    mutate(sp500_cumulative_return = cumprod(1 + sp500),
+           plan_cumulative_return = cumprod(1 + return)) %>% 
+    #add the base fy before the first fy
+    group_modify(~add_row(.x, .before = 0)) %>% 
+    mutate(fy = ifelse(is.na(fy), min(fy, na.rm = T) - 1, fy),
+           across(contains("cumulative"), ~ ifelse(is.na(.x), 1, .x)),
+           excess_sp500_cumulative_return = plan_cumulative_return - sp500_cumulative_return) %>% 
+    ungroup()
+    
+    if(return_type == "cumulative") {
+      return(pension_data_sp500_benchmark %>% 
+               #rename columns to clarify the benchmarking period
+               rename_with(~ paste0(.x, "_", benchmark_period), contains("cumulative"))
+             )
+    } else {
+      return(pension_data_sp500_benchmark %>% 
+               group_by(plan_name) %>% 
+             summarise(plan_avg_return = geo_return(return, na.rm = T),
+                       sp500_avg_return = geo_return(sp500, na.rm = T)) %>% 
+             ungroup() %>% 
+             mutate(excess_sp500_avg_return = plan_avg_return - sp500_avg_return) %>% 
+             #rename columns to clarify the benchmarking period
+             rename_with(~ paste0(.x, "_", benchmark_period), contains("avg"))
+      )
+    }
+
+}
+
+# test_cumulative <- benchmark_pension_sp500(15, ppd_clean, index_returns, end_fy, return_type = "cumulative")
+# test_avg <- benchmark_pension_sp500(15, ppd_clean, index_returns, end_fy, return_type = "avg")
+
+benchmark_pension_sp500_2 <- function(benchmark_period, pension_data, index_data, end_fy, return_type = "cumulative") {
+  benchmark_output <- benchmark_pension_sp500(benchmark_period = benchmark_period,
+                                              pension_data = pension_data,
+                                              index_data = index_data,
+                                              end_fy = end_fy,
+                                              return_type = return_type)
+  if (return_type == "cumulative") {
+    benchmark_output <- benchmark_output %>% 
+      select(fy, plan_name, contains("excess_sp500"))
+  } else {
+    benchmark_output <- benchmark_output %>% 
+      select(plan_name, contains("excess_sp500"))
+  }
+}
+  
+  
+#Benchmark plan returns against SP500 for a range of periods (5,10,15,20)
+benchmark_periods <- c(5, 10, 15, 20)
+
+return_sp500_cumulative <- lapply(X = benchmark_periods, FUN = benchmark_pension_sp500_2, 
+                                  pension_data = ppd_clean, 
+                                  index_data = index_returns, 
+                                  end_fy = 2022) %>% 
+  reduce(full_join) %>% 
+  arrange(plan_name, fy)
+
+
+return_sp500_average <- lapply(X = benchmark_periods, FUN = benchmark_pension_sp500_2, 
+                           pension_data = ppd_clean, 
+                           index_data = index_returns, 
+                           end_fy = 2022,
+                           return_type = "average") %>%
+  reduce(full_join)
+
+#Join sp500 benchmark results (average) with plans' mva values
+return_sp500_average <- return_sp500_average %>% 
+  left_join(ppd_clean_2022 %>% select(plan_name, mva), by = "plan_name")
+
+#Visualize excess benchmark cumulative returns for all the plans, with faceting by benchmark period
+return_sp500_cumulative_long <- return_sp500_cumulative %>% 
+  pivot_longer(cols = contains("excess_sp500_cumulative_return"), names_to = "benchmark_period", values_to = "excess_sp500_cumulative_return") %>% 
+  mutate(benchmark_period = str_remove(benchmark_period, "excess_sp500_cumulative_return_")) %>%
+  mutate(benchmark_period = as.integer(benchmark_period)) %>% 
+  filter(!is.na(excess_sp500_cumulative_return)) %>%
+  mutate(benchmark_period = case_when(benchmark_period == 5 ~ "5-Year",
+                                      benchmark_period == 10 ~ "10-Year",
+                                      benchmark_period == 15 ~ "15-Year",
+                                      benchmark_period == 20 ~ "20-Year"))
+
+ggplot(return_sp500_cumulative_long, aes(x = fy, y = excess_sp500_cumulative_return, group = plan_name)) +
+  geom_line(alpha = 0.1, color = "#FF6633", size = 0.8) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(8)) +
+  scale_x_continuous(breaks = seq(2000, max(ppd_clean$fy), 2)) +
+  #add a horizontal line at 0
+  geom_hline(yintercept = 0, linetype = "dashed", size = 1) +
+  labs(x= NULL, y = "Excess Benchmark Cumulative Return (S&P500)") +
+  facet_wrap(~factor(benchmark_period, levels = c("5-Year", "10-Year", "15-Year", "20-Year")), nrow = 2, scales = "free") +
+  theme_reason() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+#Visualize excess benchmark average returns for all the plans, with faceting by benchmark period
+return_sp500_average_long <- return_sp500_average %>% 
+  pivot_longer(cols = contains("excess_sp500_avg_return"), names_to = "benchmark_period", values_to = "excess_sp500_avg_return") %>% 
+  mutate(benchmark_period = str_remove(benchmark_period, "excess_sp500_avg_return_")) %>%
+  mutate(benchmark_period = as.integer(benchmark_period)) %>% 
+  filter(!is.na(excess_sp500_avg_return)) %>%
+  mutate(benchmark_period = case_when(benchmark_period == 5 ~ "5-Year",
+                                      benchmark_period == 10 ~ "10-Year",
+                                      benchmark_period == 15 ~ "15-Year",
+                                      benchmark_period == 20 ~ "20-Year"),
+         benchmark_period = factor(benchmark_period, levels = c("5-Year", "10-Year", "15-Year", "20-Year")))
+
+ggplot(return_sp500_average_long, aes(x = benchmark_period, y = excess_sp500_avg_return)) +
+  stat_dots(aes(fill = after_stat(y > 0)), linewidth = 0, show.legend = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", col = "gray") +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(8)) +
+  labs(x = "Benchmark Period", y = "Excess Benchmark Average Return (Empirical)") +
+  theme_reason()
+
+
+
+
+```
+
+The S&P500 may not be the appropriate benchmark for all plans. Below is a more appropriate benchmarking method that takes into account the risk & return profile of each pension fund.
+
+```{r}
+#| warning: false
+#| label: fig-return-benchmarking-empirical
+#| fig-cap: "Investment Return Benchmarking (Empirical)"
+
+
+#Custom benchmark function to select target columns
+benchmark_pension_all_2 <- function(benchmark_period, pension_data, index_data, index_names, end_fy, return_type = "cumulative") {
+  benchmark_output <- benchmark_pension_all(benchmark_period = benchmark_period,
+                                              pension_data = pension_data,
+                                              index_data = index_data,
+                                              index_names = index_names,
+                                              end_fy = end_fy,
+                                              return_type = return_type)
+  
+  if (return_type == "cumulative") {
+    benchmark_output <- benchmark_output %>% 
+      select(fy, plan_name, contains("excess_benchmark"))
+  } else {
+    benchmark_output <- benchmark_output %>% 
+      select(plan_name, contains("excess_benchmark"))
+  }
+}
+
+
+
+#Benchmark plan returns for a range of periods (5,10,15,20 years)
+benchmark_periods <- c(5,10,15,20)
+
+return_benchmark_cumulative <- lapply(X = benchmark_periods, FUN = benchmark_pension_all_2,
+                                       pension_data = ppd_clean,
+                                       index_data = index_returns,
+                                       index_names = c("us_stock", "us_bond", "ex_us_stock", "lag_us_stock"),
+                                       end_fy = 2022) %>% 
+  reduce(full_join) %>% 
+  arrange(plan_name, fy)
+
+
+
+
+return_benchmark_average <- lapply(X = benchmark_periods, FUN = benchmark_pension_all_2,
+                                       pension_data = ppd_clean,
+                                       index_data = index_returns,
+                                       index_names = c("us_stock", "us_bond", "ex_us_stock", "lag_us_stock"),
+                                       end_fy = 2022,
+                                       return_type = "average") %>% 
+  reduce(full_join)
+
+
+#Join benchmark results (average) with plans' mva values
+return_benchmark_average <- return_benchmark_average %>% 
+  left_join(ppd_clean_2022 %>% select(plan_name, mva), by = "plan_name")
+
+
+#Visualize excess benchmark cumulative returns for all the plans, with faceting by benchmark period
+return_benchmark_cumulative_long <- return_benchmark_cumulative %>% 
+  pivot_longer(cols = contains("excess_benchmark_cumulative_return"), names_to = "benchmark_period", values_to = "excess_benchmark_cumulative_return") %>% 
+  mutate(benchmark_period = str_remove(benchmark_period, "excess_benchmark_cumulative_return_")) %>%
+  mutate(benchmark_period = as.integer(benchmark_period)) %>% 
+  filter(!is.na(excess_benchmark_cumulative_return)) %>%
+  mutate(benchmark_period = case_when(benchmark_period == 5 ~ "5-Year",
+                                      benchmark_period == 10 ~ "10-Year",
+                                      benchmark_period == 15 ~ "15-Year",
+                                      benchmark_period == 20 ~ "20-Year"))
+
+ggplot(return_benchmark_cumulative_long, aes(x = fy, y = excess_benchmark_cumulative_return, group = plan_name)) +
+  geom_line(alpha = 0.1, color = "#FF6633", size = 0.8) +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(8)) +
+  scale_x_continuous(breaks = seq(2000, max(ppd_clean$fy), 2)) +
+  #add a horizontal line at 0
+  geom_hline(yintercept = 0, linetype = "dashed", size = 1) +
+  labs(x= NULL, y = "Excess Benchmark Cumulative Return (Empirical)") +
+  facet_wrap(~factor(benchmark_period, levels = c("5-Year", "10-Year", "15-Year", "20-Year")), nrow = 2, scales = "free") +
+  theme_reason() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+#Visualize excess benchmark average returns for all the plans, with faceting by benchmark period
+return_benchmark_average_long <- return_benchmark_average %>% 
+  pivot_longer(cols = contains("excess_benchmark_avg_return"), names_to = "benchmark_period", values_to = "excess_benchmark_avg_return") %>% 
+  mutate(benchmark_period = str_remove(benchmark_period, "excess_benchmark_avg_return_")) %>%
+  mutate(benchmark_period = as.integer(benchmark_period)) %>% 
+  filter(!is.na(excess_benchmark_avg_return)) %>%
+  mutate(benchmark_period = case_when(benchmark_period == 5 ~ "5-Year",
+                                      benchmark_period == 10 ~ "10-Year",
+                                      benchmark_period == 15 ~ "15-Year",
+                                      benchmark_period == 20 ~ "20-Year"),
+         benchmark_period = factor(benchmark_period, levels = c("5-Year", "10-Year", "15-Year", "20-Year")))
+
+ggplot(return_benchmark_average_long, aes(x = benchmark_period, y = excess_benchmark_avg_return)) +
+  stat_dots(aes(fill = after_stat(y > 0)), linewidth = 0, show.legend = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", col = "gray") +
+  scale_y_continuous(labels = percent_format(),
+                     breaks = pretty_breaks(8)) +
+  labs(x = "Benchmark Period", y = "Excess Benchmark Average Return (Empirical)") +
+  theme_reason()
+  
+
+
+```
+
+### Ranking Plan Investment Performance
+
+The interactive table below shows all the pension plans in our sample from the best performing plans to the worst performing ones in terms of average returns over the last 22 years. You can sort the table based on any column and search for any specific plan.
+
+```{r}
+#| column: screen-inset-shaded
+return_plan_2022_table <- return_plan_2022 %>% 
+  select(fy, plan_name, gov_type2, aal, mva, funded_ratio_mva, latest_arr, return,
+         avg_return, rolling_15, rolling_10, rolling_5) %>% 
+  arrange(desc(avg_return))
+
+max_mva_aal <- max(return_plan_2022_table$mva, return_plan_2022_table$aal, na.rm = T)
+
+
+reactable(
+  data = return_plan_2022_table,
+  filterable = T,
+  defaultSorted = list(avg_return = "desc"),
+  columns = list(
+    fy = colDef(name = "Year", show = F),
+    plan_name = colDef(name = "Plan"),
+    gov_type2 = colDef(name = "Type",
+                         cell = function(value) {
+                           class = paste0("tag type-", str_replace_all(tolower(value), " ", ""))
+                           div(class = class, value)
+                         }),
+    
+    aal = colDef(name = "AAL",
+                   cell = function(value) {dollar(value, scale = 1/1000000, suffix = "B")},
+                   style = function(value) {
+                     bar_style(width = value / max_mva_aal,
+                               fill = "#ffcc33")
+                   }
+      ),
+    
+    mva = colDef(name = "MVA",
+                   cell = function(value) {dollar(value, scale = 1/1000000, suffix = "B")},
+                   style = function(value) {
+                     bar_style(width = value / max_mva_aal,
+                               fill = "#669933")
+                   }
+      ),
+    
+    funded_ratio_mva = colDef(name = "Funded Ratio", 
+                            format = colFormat(percent = T, digits = 0),
+                            style = function(value) {
+                              normalized <- (value - min(return_plan_2022_table$funded_ratio_mva, na.rm = T)) / (max(return_plan_2022_table$funded_ratio_mva, na.rm = T) - min(return_plan_2022_table$funded_ratio_mva, na.rm = T))
+                              color <- fund_pal(normalized)
+                              list(background = color)
+                            }),
+    
+    return = colDef(name = "2022 Return",
+                    format = colFormat(percent = T, digits = 2)),
+    
+    latest_arr = colDef(name = "Latest ARR",
+                        format = colFormat(percent = T, digits = 2)),
+    
+    avg_return = colDef(name = "22-Year Avg Return",
+                        format = colFormat(percent = T, digits = 2),
+                        style = function(value) {
+                          bar_style(width = value / (max(return_plan_2022$avg_return) + 0.01),
+                                    fill = return_tones[1])
+                        }
+                        ),
+    
+    rolling_15 = colDef(name = "15-Year Avg Return",
+                        format = colFormat(percent = T, digits = 2),
+                        style = function(value) {
+                          bar_style(width = value / (max(return_plan_2022$rolling_15) + 0.01),
+                                    fill = return_tones[2])
+                        }),
+    
+    rolling_10 = colDef(name = "10-Year Avg Return",
+                        format = colFormat(percent = T, digits = 2),
+                        style = function(value) {
+                          bar_style(width = value / (max(return_plan_2022$rolling_10) + 0.01),
+                                    fill = return_tones[3])
+                        }),
+    
+    rolling_5 = colDef(name = "5-Year Avg Return",
+                        format = colFormat(percent = T, digits = 2),
+                       style = function(value) {
+                          bar_style(width = value / (max(return_plan_2022$rolling_5) + 0.01),
+                                    fill = return_tones[4])
+                        })
+  )
+)
+```
+
+### Investment Performance Analysis
+
+Is there a correlation between public pension investment performance in terms of excess returns and funded ratios? @fig-excess-return-funded-ratio-relationship shows this relationship.
+
+```{r}
+#| warning: false
+#| label: fig-excess-return-funded-ratio-relationship
+#| fig-cap: "Correlation Between Excess Returns and Funded Ratios"
+
+excess_return_funded_ratio_cor <- cor(return_plan_2022$excess_return_latest_arr, return_plan_2022$funded_ratio_mva, use = "complete.obs")
+
+test_cor <- cor.test(return_plan_2022$excess_return_latest_arr, return_plan_2022$funded_ratio_mva, use = "complete.obs")
+
+
+ggplot(return_plan_2022, aes(x = excess_return_latest_arr, y = funded_ratio_mva)) +
+  geom_point(col = "#FF6633") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_x_continuous(labels = percent_format()) +
+  stat_cor(method = "pearson") +
+  labs(x = "Excess Returns (22-Year) Over Latest ARRs", y = "Funded Ratio (MVA)") +
+  theme_reason()
+```
+
+The correlation is statistically significant, though it's not particularly strong (`r label_number(accuracy = 0.01)(excess_return_funded_ratio_cor)`).
+
+Is there a relationship between plan sizes and investment performance?
+
+```{r}
+#| warning: false
+#| layout-nrow: 1
+#| column: page
+#| label: fig-return-plan-size-relationship
+#| fig-cap: 
+#| - "Correlation Between Plan Size and Average Returns" 
+#| - "Correlation Between Plan Size and Average Excess Returns"
+ggplot(return_plan_2022, aes(x = mva, y = avg_return)) +
+  geom_point(col = "#FF6633") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = dollar_format(scale = 1/1000000, suffix = "B", accuracy = 0.1),
+                     breaks = log_breaks(10)) +
+  geom_smooth(method = "lm") +
+  stat_cor(method = "pearson") +
+  labs(x = "Market Assets", y = "22-Year Avg Return") +
+  theme_reason()
+
+# model <- lm(log(mva) ~ avg_return, return_plan_2022)
+# 
+# summary(model)
+# 
+# cor(log(return_plan_2022$mva), return_plan_2022$avg_return, use = "complete.obs")
+
+ggplot(return_plan_2022, aes(x = mva, y = excess_return_latest_arr)) +
+geom_point(col = "#FF6633") +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_x_continuous(trans = "log10",
+                     labels = dollar_format(scale = 1/1000000, suffix = "B", accuracy = 0.1),
+                     breaks = log_breaks(10)) +
+  stat_cor(method = "pearson") +
+  labs(x = "Market Assets", y = "22-Year Excess Return - Annualized") +
+  theme_reason()
+
+```
+
+## Asset Allocation
+
+### Overview
+
+How did the aggregate asset allocation change over time?
+
+```{r}
+#| warning: false
+#Calculate asset allocation over time
+#Exclude Leverage_Total_Actl
+
+test_mva <- ppd_clean %>% 
+  group_by(fy) %>% 
+  summarise(total_mva = sum(mva, na.rm = T))
+
+asset_allocation <- ppd_clean %>% 
+  filter(!is.na(mva)) %>% 
+  select(-Leverage_Total_Actl) %>% 
+  group_by(fy) %>% 
+    summarise(across(EQTotal_Actl:OtherTotal_Actl, 
+                     ~ weighted.mean(.x, w = mva, na.rm = T),
+                     .names = "{.col}_share"),
+              across(EQTotal_Actl:OtherTotal_Actl, 
+                     ~ sum(.x * mva, na.rm = T),
+                     .names = "{.col}_amount")) %>% 
+  ungroup() %>% 
+  rowwise() %>%
+  mutate(total_share = sum(c_across(EQTotal_Actl_share:OtherTotal_Actl_share)),
+         total_amount = sum(c_across(EQTotal_Actl_amount:OtherTotal_Actl_amount))) %>% 
+  ungroup() %>% 
+  left_join(test_mva) %>% 
+  mutate(ratio = total_amount / total_mva)
+  # mutate(other_share = AltMiscTotal_Actl + OtherTotal_Actl) %>% 
+  # select(-AltMiscTotal_Actl, -OtherTotal_Actl)
+  
+#Something is wrong here: the ratio above should be 1 or very close to 1. 
+
+
+
+# names(asset_allocation) <- c("fy", "equity_share", "fixed_income_share",
+#                              "real_estate_share", "private_equity_share",
+#                              "hedge_fund_share", "commodity_share", "cash_share",
+#                              "other_share")
+
+```
+
+```{r}
+#| warning: false
+#| label: fig-aggregate-asset-allocation-share
+#| fig-cap: "Public Pension Aggregate Asset Allocation"
+asset_allocation_share <- asset_allocation %>% 
+  select(fy, contains("share"), -total_share) %>% 
+  rename_with(.fn = ~ str_replace(.x, "Total_Actl_share", ""),
+              .col = -fy)
+
+asset_allocation_share_long <- asset_allocation_share %>% 
+  pivot_longer(cols = -fy,
+               names_to = "asset_class",
+               values_to = "share")
+
+ggplot(asset_allocation_share_long, aes(x = fy, y = share, fill = fct_reorder2(asset_class, fy, share))) +
+  geom_area() +
+  scale_y_continuous(labels = percent_format()) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  theme_reason() +
+  labs(fill = NULL, x = NULL, y = NULL) +
+  theme(legend.position = "right")
+```
+
+How did the aggregate asset class dollar amounts change over time?
+
+```{r}
+#| warning: false
+#| label: fig-aggregate-asset-allocation-amount
+#| fig-cap: "Public Pension Aggregate Asset Allocation (in $ amounts)"
+asset_allocation_amount <- asset_allocation %>% 
+  select(fy, contains("amount"), -total_amount) %>% 
+  rename_with(.fn = ~ str_replace(.x, "Total_Actl_amount", ""),
+              .col = -fy)
+
+asset_allocation_amount_long <- asset_allocation_amount %>% 
+  pivot_longer(cols = -fy,
+               names_to = "asset_class",
+               values_to = "amount")
+
+ggplot(asset_allocation_amount_long, aes(x = fy, y = amount, fill = fct_reorder2(asset_class, fy, amount))) +
+  geom_area() +
+  scale_y_continuous(labels = dollar_format(scale = 1/1000000000, suffix = " Trillion")) +
+  scale_x_continuous(breaks = min(ppd_clean$fy):max(ppd_clean$fy),
+                     guide = guide_axis(angle = 90)) +
+  theme_reason() +
+  labs(fill = NULL, x = NULL, y = NULL) +
+  theme(legend.position = "right")
+
+```
+
+Visualize asset allocation over time (Thuy):
+
+-   Normal area chart
+
+-   Sankey chart for the asset allocation percentages
+
+-   Sankey chart for the asset allocation amounts
+
+-   
+
+Top 10 funds with largest percentage of alternative investments as part of their portfolio
+
+Show returns by asset class
+
+Let's look into individual plans' investment performance vs. ARR and return benchmarks:
+
+-   SP500 (and some other popular indexes)
+
+-   Empirical benchmarks that we came up with
+
+Percentage of funds with no/negative Alpha (investment returns lower than public market) --- perhaps over the past decade to put past two years of good returns into context
+
+Plan performance by plan size --\> do bigger plans perform better than smaller plans?
+
+Plan performance by quantile?
+
+Plan Funded Status after DR adjustment (use 6%?)
+
+Maybe look into the median rate as the rate to use for the adjustment?
+
+Incorporate forecast tool
+
+Top & bottom 10-25 plans in terms of unfunded liability per capita (maybe just state plans only?)
+
+Top & bottom 10-25 plans in terms of unfunded liability per member?
