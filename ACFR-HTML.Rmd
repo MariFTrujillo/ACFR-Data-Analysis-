@@ -1432,7 +1432,7 @@ top_PS_SD_2022 <- top_PS_SD_2022 %>%
   mutate_at(vars("Per Student Net Pension Liability", "Total NPL"), scales::dollar)
 
  
-html_table_top_SD_2022 <- top_SD_2022 %>%
+html_table_top_SD_2022 <- top_PS_SD_2022 %>%
   kable() %>%
   kable_styling(full_width = FALSE)
 
