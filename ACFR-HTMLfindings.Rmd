@@ -1,0 +1,598 @@
+---
+title: "ACFR Overview"
+author: "Mariana F Trujillo"
+date: "April 2024"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+  pdf_document:
+    toc: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(tidyverse)
+library(rio)
+library(ggridges)
+library(ggpattern)
+library(ggdist)
+library(ggbeeswarm)
+library(ggstream)
+library(ggpubr)
+library(scales)
+library(knitr)
+library(reactable)
+library(htmltools)
+library(zoo)
+library(quantmod)
+library(PerformanceAnalytics)
+library(quadprog)
+library(janitor)
+library(kableExtra)
+library(patchwork)
+library(showtext)
+library(RColorBrewer)
+library(reshape2)
+library(tools)
+
+knitr::opts_chunk$set(warning = FALSE)
+
+States3y <- read.csv("all_states_3years.csv")
+Cities3y <- read.csv("top100_cities.csv")
+Counties3y <- read.csv("top100_counties.csv")
+SD3y <- read.csv("top100_sd.csv")
+CensusStates <- read.csv("CensusStates.csv")
+CensusCities_Counties <- read.csv("CensusCities_Conties.csv")
+
+StateGDP <- read_xlsx("State_GDP.xlsx")
+
+PartisanS<- read.csv("partisan_lean_STATES.csv")
+
+
+source("APR functions.R")
+source("Pension projection functions.R")
+source("Reason theme.R")
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  fig.align = "center",
+  cache = FALSE
+)
+
+options(scipen = 999)
+
+```
+
+```{r, echo=FALSE}
+States3y <- States3y %>%
+  mutate(npl_per_capita = net_pension_liability / population,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ population,
+         budget_deficit = revenues - expenses) 
+
+Cities3y  <- Cities3y %>%
+    mutate(npl_per_capita = net_pension_liability / population,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ population,
+         budget_deficit = revenues - expenses) 
+
+Counties3y <- Counties3y %>%
+  mutate(npl_per_capita = net_pension_liability / population,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ population,
+         budget_deficit = revenues - expenses) 
+
+
+SD3y <- SD3y %>%
+  mutate(npl_per_student= net_pension_liability / enrollment_22,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ enrollment_22,
+         budget_deficit = revenues - expenses) 
+
+```
+
+
+# Concentration of Public Employee Debt
+Employee debt = NPL + Net OPEB Liability 
+
+## States
+
+* In 2022, U.S. States declared owing $1.08 trillion in public employee debt
+  * $528B as net OPEB liabilities, $520B as net pension liabilities, and $27B as accrued compensated absences.
+
+* Four states are responsible for 57% of the total public employee debt held by states. 
+  * Illinois, New Jersey, California, and Texas (All States: $1.08T; Top 4: $616B)	
+
+* Ten states are responsible for 82% of the total public employee debt held by U.S. states.
+  * Illinois, New Jersey, California, Texas, New York, Connecticut, Massachusetts, Pennsylvania, Kentucky, and Maryland (All States: $1.08T; Top 10: $883B)
+
+* Ten states are responsible for 85% of the total net OPEB liability held by U.S. states. 
+  * California, New Jersey, Texas, New York, Illinois, Connecticut, Pennsylvania, Massachusetts, Maryland, and Delaware (All States: $528B; Top 10: $447B).
+
+
+Proof:
+```{r}
+top_4_states_debt_2022 <- States3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 4) %>%
+  summarize(total_employee_debt_top_4 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_4 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_4 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_4 = sum(compensated_absences, na.rm = TRUE))
+
+top_10_states_debt_2022 <- States3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  summarize(total_employee_debt_top_10 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_10 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_10 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_10 = sum(compensated_absences, na.rm = TRUE))
+
+employee_debt_summary_S <- States3y %>%
+  filter(year == 2022) %>%
+  summarize(total_employee_debt_all = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_all = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_all = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_all = sum(compensated_absences, na.rm = TRUE))
+
+top_4_percentage_debt <- top_4_states_debt_2022$total_employee_debt_top_4 / employee_debt_summary_S$total_employee_debt_all * 100
+top_10_percentage_debt <- top_10_states_debt_2022$total_employee_debt_top_10 / employee_debt_summary_S$total_employee_debt_all * 100
+
+top_4_percentage_opeb <- top_4_states_debt_2022$total_net_opeb_liability_top_4 / employee_debt_summary_S$total_net_opeb_liability_all * 100
+top_10_percentage_opeb <- top_10_states_debt_2022$total_net_opeb_liability_top_10 / employee_debt_summary_S$total_net_opeb_liability_all * 100
+
+top_4_percentage_pension <- top_4_states_debt_2022$total_net_pension_liability_top_4 / employee_debt_summary_S$total_net_pension_liability_all * 100
+top_10_percentage_pension <- top_10_states_debt_2022$total_net_pension_liability_top_10 / employee_debt_summary_S$total_net_pension_liability_all * 100
+
+top_4_percentage_comp_absences <- top_4_states_debt_2022$total_compensated_absences_top_4 / employee_debt_summary_S$total_compensated_absences_all * 100
+top_10_percentage_comp_absences <- top_10_states_debt_2022$total_compensated_absences_top_10 / employee_debt_summary_S$total_compensated_absences_all * 100
+
+combined_results <- tibble(
+  Category = c("Top 4 States", "Top 10 States", "All States"),
+  Total_Employee_Debt = c(top_4_states_debt_2022$total_employee_debt_top_4, 
+                          top_10_states_debt_2022$total_employee_debt_top_10, 
+                          employee_debt_summary_S$total_employee_debt_all),
+  Percentage_of_Total_Debt = c(top_4_percentage_debt, top_10_percentage_debt, 100),
+  Total_Net_OPEB_Liability = c(top_4_states_debt_2022$total_net_opeb_liability_top_4, 
+                               top_10_states_debt_2022$total_net_opeb_liability_top_10, 
+                               employee_debt_summary_S$total_net_opeb_liability_all),
+  Percentage_of_Total_OPEB = c(top_4_percentage_opeb, top_10_percentage_opeb, 100),
+  Total_Net_Pension_Liability = c(top_4_states_debt_2022$total_net_pension_liability_top_4, 
+                                  top_10_states_debt_2022$total_net_pension_liability_top_10, 
+                                  employee_debt_summary_S$total_net_pension_liability_all),
+  Percentage_of_Total_Pension = c(top_4_percentage_pension, top_10_percentage_pension, 100),
+  Total_Compensated_Absences = c(top_4_states_debt_2022$total_compensated_absences_top_4,
+                                 top_10_states_debt_2022$total_compensated_absences_top_10,
+                                 employee_debt_summary_S$total_compensated_absences_all),
+  Percentage_of_Total_Comp_Absences = c(top_4_percentage_comp_absences, top_10_percentage_comp_absences, 100)
+)
+
+combined_results %>%
+  mutate(Total_Employee_Debt = dollar(Total_Employee_Debt),
+         Percentage_of_Total_Debt = percent(Percentage_of_Total_Debt / 100, accuracy = 0.001),
+         Total_Net_OPEB_Liability = dollar(Total_Net_OPEB_Liability),
+         Percentage_of_Total_OPEB = percent(Percentage_of_Total_OPEB / 100, accuracy = 0.001),
+         Total_Net_Pension_Liability = dollar(Total_Net_Pension_Liability),
+         Percentage_of_Total_Pension = percent(Percentage_of_Total_Pension / 100, accuracy = 0.001),
+         Total_Compensated_Absences = dollar(Total_Compensated_Absences),
+         Percentage_of_Total_Comp_Absences = percent(Percentage_of_Total_Comp_Absences / 100, accuracy = 0.001)) %>%
+  kable(caption = "Total Employee Debt, Net OPEB Liability, Net Pension Liability, and Compensated Absences for Top 4 and Top 10 States in 2022", format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+
+## Cities
+
+* In 2022, the top 100 most populous U.S. cities declared owing $293 billion in public employee debt.
+  * $131B as net OPEB liabilities, $146B as net pension liabilities, and $15B as accrued compensated absences.
+
+* Ten cities are responsible for 75% of the total public employee debt held by the 100 most populous cities.
+  * New York, Chicago, Philadelphia, Austin, Los Angeles, Houston, Phoenix, Portland, City and County of San Francisco, and Dallas. (All cities: $293B; Top 10: $220B).
+
+* The two most indebted cities, NYC and Chicago, are responsible for 60% of the total public employee debt and 70% of the net OPEB liability held by the 100 most populous cities.
+  * New York, Chicago (All cities: $293B; Top 2: $175B).
+
+
+Proof:
+```{r}
+
+top_2_cities_debt_2022 <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 2) %>%
+  summarize(total_employee_debt_top_2 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_2 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_2 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_2 = sum(compensated_absences, na.rm = TRUE),
+            city_names = paste(name, collapse = ", "))
+
+top_4_cities_debt_2022 <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 4) %>%
+  summarize(total_employee_debt_top_4 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_4 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_4 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_4 = sum(compensated_absences, na.rm = TRUE))
+
+top_10_cities_debt_2022 <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  summarize(total_employee_debt_top_10 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_10 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_10 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_10 = sum(compensated_absences, na.rm = TRUE))
+
+employee_debt_summary_C <- Cities3y %>%
+  filter(year == 2022) %>%
+  summarize(total_employee_debt_all = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_all = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_all = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_all = sum(compensated_absences, na.rm = TRUE))
+
+top_2_percentage_debt <- top_2_cities_debt_2022$total_employee_debt_top_2 / employee_debt_summary_C$total_employee_debt_all * 100
+top_4_percentage_debt_c <- top_4_cities_debt_2022$total_employee_debt_top_4 / employee_debt_summary_C$total_employee_debt_all * 100
+top_10_percentage_debt_c <- top_10_cities_debt_2022$total_employee_debt_top_10 / employee_debt_summary_C$total_employee_debt_all * 100
+
+top_2_percentage_opeb <- top_2_cities_debt_2022$total_net_opeb_liability_top_2 / employee_debt_summary_C$total_net_opeb_liability_all * 100
+top_4_percentage_opeb_c <- top_4_cities_debt_2022$total_net_opeb_liability_top_4 / employee_debt_summary_C$total_net_opeb_liability_all * 100
+top_10_percentage_opeb_c <- top_10_cities_debt_2022$total_net_opeb_liability_top_10 / employee_debt_summary_C$total_net_opeb_liability_all * 100
+
+top_2_percentage_pension <- top_2_cities_debt_2022$total_net_pension_liability_top_2 / employee_debt_summary_C$total_net_pension_liability_all * 100
+top_4_percentage_pension_c <- top_4_cities_debt_2022$total_net_pension_liability_top_4 / employee_debt_summary_C$total_net_pension_liability_all * 100
+top_10_percentage_pension_c <- top_10_cities_debt_2022$total_net_pension_liability_top_10 / employee_debt_summary_C$total_net_pension_liability_all * 100
+
+top_2_percentage_comp_absences <- top_2_cities_debt_2022$total_compensated_absences_top_2 / employee_debt_summary_C$total_compensated_absences_all * 100
+top_4_percentage_comp_absences_c <- top_4_cities_debt_2022$total_compensated_absences_top_4 / employee_debt_summary_C$total_compensated_absences_all * 100
+top_10_percentage_comp_absences_c <- top_10_cities_debt_2022$total_compensated_absences_top_10 / employee_debt_summary_C$total_compensated_absences_all * 100
+
+combined_results_c <- tibble(
+  Category = c("Top 2 Cities", "Top 4 Cities", "Top 10 Cities", "All Cities"),
+  Total_Employee_Debt = c(top_2_cities_debt_2022$total_employee_debt_top_2,
+                          top_4_cities_debt_2022$total_employee_debt_top_4, 
+                          top_10_cities_debt_2022$total_employee_debt_top_10, 
+                          employee_debt_summary_C$total_employee_debt_all),
+  Percentage_of_Total_Debt = c(top_2_percentage_debt, top_4_percentage_debt_c, top_10_percentage_debt_c, 100),
+  Total_Net_OPEB_Liability = c(top_2_cities_debt_2022$total_net_opeb_liability_top_2,
+                               top_4_cities_debt_2022$total_net_opeb_liability_top_4, 
+                               top_10_cities_debt_2022$total_net_opeb_liability_top_10, 
+                               employee_debt_summary_C$total_net_opeb_liability_all),
+  Percentage_of_Total_OPEB = c(top_2_percentage_opeb, top_4_percentage_opeb_c, top_10_percentage_opeb_c, 100),
+  Total_Net_Pension_Liability = c(top_2_cities_debt_2022$total_net_pension_liability_top_2,
+                                  top_4_cities_debt_2022$total_net_pension_liability_top_4, 
+                                  top_10_cities_debt_2022$total_net_pension_liability_top_10, 
+                                  employee_debt_summary_C$total_net_pension_liability_all),
+  Percentage_of_Total_Pension = c(top_2_percentage_pension, top_4_percentage_pension_c, top_10_percentage_pension_c, 100),
+  Total_Compensated_Absences = c(top_2_cities_debt_2022$total_compensated_absences_top_2,
+                                 top_4_cities_debt_2022$total_compensated_absences_top_4,
+                                 top_10_cities_debt_2022$total_compensated_absences_top_10,
+                                 employee_debt_summary_C$total_compensated_absences_all),
+  Percentage_of_Total_Comp_Absences = c(top_2_percentage_comp_absences, top_4_percentage_comp_absences_c, top_10_percentage_comp_absences_c, 100),
+  City_Names = c(top_2_cities_debt_2022$city_names, NA, NA, NA)
+)
+
+combined_results_c %>%
+  mutate(Total_Employee_Debt = dollar(Total_Employee_Debt),
+         Percentage_of_Total_Debt = percent(Percentage_of_Total_Debt / 100, accuracy = 0.001),
+         Total_Net_OPEB_Liability = dollar(Total_Net_OPEB_Liability),
+         Percentage_of_Total_OPEB = percent(Percentage_of_Total_OPEB / 100, accuracy = 0.001),
+         Total_Net_Pension_Liability = dollar(Total_Net_Pension_Liability),
+         Percentage_of_Total_Pension = percent(Percentage_of_Total_Pension / 100, accuracy = 0.001),
+         Total_Compensated_Absences = dollar(Total_Compensated_Absences),
+         Percentage_of_Total_Comp_Absences = percent(Percentage_of_Total_Comp_Absences / 100, accuracy = 0.001)) %>%
+  kable(caption = "Total Employee Debt, Net OPEB Liability, Net Pension Liability, and Compensated Absences for Top 2, Top 4, and Top 10 Cities in 2022", format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+
+```{r}
+top_10_cities_names <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  select(name) %>%
+  mutate(rank = row_number()) %>%
+  arrange(rank)
+
+top_10_cities_names %>%
+  kable(caption = "Top 10 Cities by Employee Debt in 2022", col.names = c("Rank", "City")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+## Counties
+
+* In 2022, the top 100 most populous U.S. counties declared owing $170 billion in public employee debt.
+  * $81B as net OPEB liabilities, $77B as net pension liabilities, and $11B as accrued compensated absences.
+
+* Ten counties are responsible for 54% of the total public employee debt held by the 100 most populous counties.
+  * Los Angeles County, Cook County, Philadelphia, Nassau County, Miami-Dade County, Suffolk County, City and County of San Francisco, Santa Clara County, Harris County, and Prince Georges County. (All counties: $170B; Top 10: $92B).
+
+* Los Angeles County was responsible for 21% of the total public employee debt and 33% of the net OPEB liability held by the 100 most populous counties.  
+  * Public employee Debt (All counties: $170B; Los Angeles: $36B). Net OPEB liability (All counties: $81B; Los Angeles: $ 27B).
+
+
+
+Proof:
+```{r}
+top_1_county_debt_2022 <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 1) %>%
+  summarize(total_employee_debt_top_1 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_1 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_1 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_1 = sum(compensated_absences, na.rm = TRUE),
+            county_name = paste(name, collapse = ", "))
+
+top_2_counties_debt_2022 <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 2) %>%
+  summarize(total_employee_debt_top_2 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_2 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_2 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_2 = sum(compensated_absences, na.rm = TRUE),
+            county_names = paste(name, collapse = ", "))
+
+top_4_counties_debt_2022 <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 4) %>%
+  summarize(total_employee_debt_top_4 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_4 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_4 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_4 = sum(compensated_absences, na.rm = TRUE))
+
+top_10_counties_debt_2022 <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  summarize(total_employee_debt_top_10 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_10 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_10 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_10 = sum(compensated_absences, na.rm = TRUE))
+
+employee_debt_summary_Co <- Counties3y %>%
+  filter(year == 2022) %>%
+  summarize(total_employee_debt_all = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_all = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_all = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_all = sum(compensated_absences, na.rm = TRUE))
+
+top_1_percentage_debt <- top_1_county_debt_2022$total_employee_debt_top_1 / employee_debt_summary_Co$total_employee_debt_all * 100
+top_2_percentage_debt <- top_2_counties_debt_2022$total_employee_debt_top_2 / employee_debt_summary_Co$total_employee_debt_all * 100
+top_4_percentage_debt_co <- top_4_counties_debt_2022$total_employee_debt_top_4 / employee_debt_summary_Co$total_employee_debt_all * 100
+top_10_percentage_debt_co <- top_10_counties_debt_2022$total_employee_debt_top_10 / employee_debt_summary_Co$total_employee_debt_all * 100
+
+top_1_percentage_opeb <- top_1_county_debt_2022$total_net_opeb_liability_top_1 / employee_debt_summary_Co$total_net_opeb_liability_all * 100
+top_2_percentage_opeb <- top_2_counties_debt_2022$total_net_opeb_liability_top_2 / employee_debt_summary_Co$total_net_opeb_liability_all * 100
+top_4_percentage_opeb_co <- top_4_counties_debt_2022$total_net_opeb_liability_top_4 / employee_debt_summary_Co$total_net_opeb_liability_all * 100
+top_10_percentage_opeb_co <- top_10_counties_debt_2022$total_net_opeb_liability_top_10 / employee_debt_summary_Co$total_net_opeb_liability_all * 100
+
+top_1_percentage_pension <- top_1_county_debt_2022$total_net_pension_liability_top_1 / employee_debt_summary_Co$total_net_pension_liability_all * 100
+top_2_percentage_pension <- top_2_counties_debt_2022$total_net_pension_liability_top_2 / employee_debt_summary_Co$total_net_pension_liability_all * 100
+top_4_percentage_pension_co <- top_4_counties_debt_2022$total_net_pension_liability_top_4 / employee_debt_summary_Co$total_net_pension_liability_all * 100
+top_10_percentage_pension_co <- top_10_counties_debt_2022$total_net_pension_liability_top_10 / employee_debt_summary_Co$total_net_pension_liability_all * 100
+
+top_1_percentage_comp_absences <- top_1_county_debt_2022$total_compensated_absences_top_1 / employee_debt_summary_Co$total_compensated_absences_all * 100
+top_2_percentage_comp_absences <- top_2_counties_debt_2022$total_compensated_absences_top_2 / employee_debt_summary_Co$total_compensated_absences_all * 100
+top_4_percentage_comp_absences_co <- top_4_counties_debt_2022$total_compensated_absences_top_4 / employee_debt_summary_Co$total_compensated_absences_all * 100
+top_10_percentage_comp_absences_co <- top_10_counties_debt_2022$total_compensated_absences_top_10 / employee_debt_summary_Co$total_compensated_absences_all * 100
+
+combined_results_co <- tibble(
+  Category = c("Top 1 County", "Top 2 Counties", "Top 4 Counties", "Top 10 Counties", "All Counties"),
+  Total_Employee_Debt = c(top_1_county_debt_2022$total_employee_debt_top_1,
+                          top_2_counties_debt_2022$total_employee_debt_top_2,
+                          top_4_counties_debt_2022$total_employee_debt_top_4, 
+                          top_10_counties_debt_2022$total_employee_debt_top_10, 
+                          employee_debt_summary_Co$total_employee_debt_all),
+  Percentage_of_Total_Debt = c(top_1_percentage_debt, top_2_percentage_debt, top_4_percentage_debt_co, top_10_percentage_debt_co, 100),
+  Total_Net_OPEB_Liability = c(top_1_county_debt_2022$total_net_opeb_liability_top_1,
+                               top_2_counties_debt_2022$total_net_opeb_liability_top_2,
+                               top_4_counties_debt_2022$total_net_opeb_liability_top_4, 
+                               top_10_counties_debt_2022$total_net_opeb_liability_top_10, 
+                               employee_debt_summary_Co$total_net_opeb_liability_all),
+  Percentage_of_Total_OPEB = c(top_1_percentage_opeb, top_2_percentage_opeb, top_4_percentage_opeb_co, top_10_percentage_opeb_co, 100),
+  Total_Net_Pension_Liability = c(top_1_county_debt_2022$total_net_pension_liability_top_1,
+                                  top_2_counties_debt_2022$total_net_pension_liability_top_2,
+                                  top_4_counties_debt_2022$total_net_pension_liability_top_4, 
+                                  top_10_counties_debt_2022$total_net_pension_liability_top_10, 
+                                  employee_debt_summary_Co$total_net_pension_liability_all),
+  Percentage_of_Total_Pension = c(top_1_percentage_pension, top_2_percentage_pension, top_4_percentage_pension_co, top_10_percentage_pension_co, 100),
+  Total_Compensated_Absences = c(top_1_county_debt_2022$total_compensated_absences_top_1,
+                                 top_2_counties_debt_2022$total_compensated_absences_top_2,
+                                 top_4_counties_debt_2022$total_compensated_absences_top_4,
+                                 top_10_counties_debt_2022$total_compensated_absences_top_10,
+                                 employee_debt_summary_Co$total_compensated_absences_all),
+  Percentage_of_Total_Comp_Absences = c(top_1_percentage_comp_absences, top_2_percentage_comp_absences, top_4_percentage_comp_absences_co, top_10_percentage_comp_absences_co, 100),
+  County_Names = c(top_1_county_debt_2022$county_name, top_2_counties_debt_2022$county_names, NA, NA, NA)
+)
+
+combined_results_co %>%
+  mutate(Total_Employee_Debt = dollar(Total_Employee_Debt),
+         Percentage_of_Total_Debt = percent(Percentage_of_Total_Debt / 100, accuracy = 0.001),
+         Total_Net_OPEB_Liability = dollar(Total_Net_OPEB_Liability),
+         Percentage_of_Total_OPEB = percent(Percentage_of_Total_OPEB / 100, accuracy = 0.001),
+         Total_Net_Pension_Liability = dollar(Total_Net_Pension_Liability),
+         Percentage_of_Total_Pension = percent(Percentage_of_Total_Pension / 100, accuracy = 0.001),
+         Total_Compensated_Absences = dollar(Total_Compensated_Absences),
+         Percentage_of_Total_Comp_Absences = percent(Percentage_of_Total_Comp_Absences / 100, accuracy = 0.001)) %>%
+  kable(caption = "Total Employee Debt, Net OPEB Liability, Net Pension Liability, and Compensated Absences for Top 1, Top 2, Top 4, and Top 10 Counties in 2022", format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+
+
+```{r}
+top_10_counties_names <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  select(name) %>%
+  mutate(rank = row_number()) %>%
+  arrange(rank)
+
+top_10_counties_names %>%
+  kable(caption = "Top 10 Counties by Employee Debt in 2022", col.names = c("Rank", "County")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+
+## School Districts
+
+* In 2022, the top 100 most populous U.S. school districts declared owing $106 billion in public employee debt. 
+  * $59B as net OPEB liabilities, $56 as net pension liabilities, and 	$4B as accrued compensated absences.
+
+* Ten school districts were responsible for 52% of the public employee debt held by the 100 most populous school districts.
+  * Chicago Board of Education, Los Angeles Unified School District, School District of Philadelphia, Montgomery County Public Schools, Prince George’S County Public Schools, Clark County School District, Fairfax County Public Schools, Anne Arundel County Board of Education, Wake County Board of Education, and Charlotte-Mecklenburg Board of Education. (All counties: $106B; Top 10: $54B).
+
+* Chicago’s and Los Angeles’s school districts are responsible for 32% of the total public employee debt and 34% of the total net pension liability held by the 100 most populous school districts.
+  * Public Employee Debt: All cities: $106B; Chicago and Los Angeles: $33B. Net Pension Liability (Alll cities: $56B; Chicago and Los Angeles: $19B).
+
+* Los Angeles’s school district was responsible for 17% of the total net OPEB liability held by the 100 most populous school districts. 
+  * All cities: $59B; Los Angeles: $10B.
+
+
+
+```{r}
+top_1_sd_debt_2022 <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 1) %>%
+  summarize(total_employee_debt_top_1 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_1 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_1 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_1 = sum(compensated_absences, na.rm = TRUE),
+            sd_name = paste(name, collapse = ", "))
+
+top_2_sd_debt_2022 <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 2) %>%
+  summarize(total_employee_debt_top_2 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_2 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_2 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_2 = sum(compensated_absences, na.rm = TRUE),
+            sd_names = paste(name, collapse = ", "))
+
+top_4_sd_debt_2022 <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 4) %>%
+  summarize(total_employee_debt_top_4 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_4 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_4 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_4 = sum(compensated_absences, na.rm = TRUE))
+
+top_10_sd_debt_2022 <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  summarize(total_employee_debt_top_10 = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_top_10 = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_top_10 = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_top_10 = sum(compensated_absences, na.rm = TRUE))
+
+employee_debt_summary_SD <- SD3y %>%
+  filter(year == 2022) %>%
+  summarize(total_employee_debt_all = sum(employee_debt, na.rm = TRUE),
+            total_net_opeb_liability_all = sum(net_opeb_liability, na.rm = TRUE),
+            total_net_pension_liability_all = sum(net_pension_liability, na.rm = TRUE),
+            total_compensated_absences_all = sum(compensated_absences, na.rm = TRUE))
+
+top_1_percentage_debt <- top_1_sd_debt_2022$total_employee_debt_top_1 / employee_debt_summary_SD$total_employee_debt_all * 100
+top_2_percentage_debt <- top_2_sd_debt_2022$total_employee_debt_top_2 / employee_debt_summary_SD$total_employee_debt_all * 100
+top_4_percentage_debt_sd <- top_4_sd_debt_2022$total_employee_debt_top_4 / employee_debt_summary_SD$total_employee_debt_all * 100
+top_10_percentage_debt_sd <- top_10_sd_debt_2022$total_employee_debt_top_10 / employee_debt_summary_SD$total_employee_debt_all * 100
+
+top_1_percentage_opeb <- top_1_sd_debt_2022$total_net_opeb_liability_top_1 / employee_debt_summary_SD$total_net_opeb_liability_all * 100
+top_2_percentage_opeb <- top_2_sd_debt_2022$total_net_opeb_liability_top_2 / employee_debt_summary_SD$total_net_opeb_liability_all * 100
+top_4_percentage_opeb_sd <- top_4_sd_debt_2022$total_net_opeb_liability_top_4 / employee_debt_summary_SD$total_net_opeb_liability_all * 100
+top_10_percentage_opeb_sd <- top_10_sd_debt_2022$total_net_opeb_liability_top_10 / employee_debt_summary_SD$total_net_opeb_liability_all * 100
+
+top_1_percentage_pension <- top_1_sd_debt_2022$total_net_pension_liability_top_1 / employee_debt_summary_SD$total_net_pension_liability_all * 100
+top_2_percentage_pension <- top_2_sd_debt_2022$total_net_pension_liability_top_2 / employee_debt_summary_SD$total_net_pension_liability_all * 100
+top_4_percentage_pension_sd <- top_4_sd_debt_2022$total_net_pension_liability_top_4 / employee_debt_summary_SD$total_net_pension_liability_all * 100
+top_10_percentage_pension_sd <- top_10_sd_debt_2022$total_net_pension_liability_top_10 / employee_debt_summary_SD$total_net_pension_liability_all * 100
+
+top_1_percentage_comp_absences <- top_1_sd_debt_2022$total_compensated_absences_top_1 / employee_debt_summary_SD$total_compensated_absences_all * 100
+top_2_percentage_comp_absences <- top_2_sd_debt_2022$total_compensated_absences_top_2 / employee_debt_summary_SD$total_compensated_absences_all * 100
+top_4_percentage_comp_absences_sd <- top_4_sd_debt_2022$total_compensated_absences_top_4 / employee_debt_summary_SD$total_compensated_absences_all * 100
+top_10_percentage_comp_absences_sd <- top_10_sd_debt_2022$total_compensated_absences_top_10 / employee_debt_summary_SD$total_compensated_absences_all * 100
+
+# Combine results into one table
+combined_results_sd <- tibble(
+  Category = c("Top 1 School District", "Top 2 School Districts", "Top 4 School Districts", "Top 10 School Districts", "All School Districts"),
+  Total_Employee_Debt = c(top_1_sd_debt_2022$total_employee_debt_top_1,
+                          top_2_sd_debt_2022$total_employee_debt_top_2,
+                          top_4_sd_debt_2022$total_employee_debt_top_4, 
+                          top_10_sd_debt_2022$total_employee_debt_top_10, 
+                          employee_debt_summary_SD$total_employee_debt_all),
+  Percentage_of_Total_Debt = c(top_1_percentage_debt, top_2_percentage_debt, top_4_percentage_debt_sd, top_10_percentage_debt_sd, 100),
+  Total_Net_OPEB_Liability = c(top_1_sd_debt_2022$total_net_opeb_liability_top_1,
+                               top_2_sd_debt_2022$total_net_opeb_liability_top_2,
+                               top_4_sd_debt_2022$total_net_opeb_liability_top_4, 
+                               top_10_sd_debt_2022$total_net_opeb_liability_top_10, 
+                               employee_debt_summary_SD$total_net_opeb_liability_all),
+  Percentage_of_Total_OPEB = c(top_1_percentage_opeb, top_2_percentage_opeb, top_4_percentage_opeb_sd, top_10_percentage_opeb_sd, 100),
+  Total_Net_Pension_Liability = c(top_1_sd_debt_2022$total_net_pension_liability_top_1,
+                                  top_2_sd_debt_2022$total_net_pension_liability_top_2,
+                                  top_4_sd_debt_2022$total_net_pension_liability_top_4, 
+                                  top_10_sd_debt_2022$total_net_pension_liability_top_10, 
+                                  employee_debt_summary_SD$total_net_pension_liability_all),
+  Percentage_of_Total_Pension = c(top_1_percentage_pension, top_2_percentage_pension, top_4_percentage_pension_sd, top_10_percentage_pension_sd, 100),
+  Total_Compensated_Absences = c(top_1_sd_debt_2022$total_compensated_absences_top_1,
+                                 top_2_sd_debt_2022$total_compensated_absences_top_2,
+                                 top_4_sd_debt_2022$total_compensated_absences_top_4,
+                                 top_10_sd_debt_2022$total_compensated_absences_top_10,
+                                 employee_debt_summary_SD$total_compensated_absences_all),
+  Percentage_of_Total_Comp_Absences = c(top_1_percentage_comp_absences, top_2_percentage_comp_absences, top_4_percentage_comp_absences_sd, top_10_percentage_comp_absences_sd, 100),
+  School_District_Names = c(top_1_sd_debt_2022$sd_name, top_2_sd_debt_2022$sd_names, NA, NA, NA)
+)
+
+# Display the combined results with formatted columns
+combined_results_sd %>%
+  mutate(Total_Employee_Debt = dollar(Total_Employee_Debt),
+         Percentage_of_Total_Debt = percent(Percentage_of_Total_Debt / 100, accuracy = 0.001),
+         Total_Net_OPEB_Liability = dollar(Total_Net_OPEB_Liability),
+         Percentage_of_Total_OPEB = percent(Percentage_of_Total_OPEB / 100, accuracy = 0.001),
+         Total_Net_Pension_Liability = dollar(Total_Net_Pension_Liability),
+         Percentage_of_Total_Pension = percent(Percentage_of_Total_Pension / 100, accuracy = 0.001),
+         Total_Compensated_Absences = dollar(Total_Compensated_Absences),
+         Percentage_of_Total_Comp_Absences = percent(Percentage_of_Total_Comp_Absences / 100, accuracy = 0.001)) %>%
+  kable(caption = "Total Employee Debt, Net OPEB Liability, Net Pension Liability, and Compensated Absences for Top 1, Top 2, Top 4, and Top 10 School Districts in 2022", format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+```{r}
+top_10_sd_names <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(desc(employee_debt)) %>%
+  slice_head(n = 10) %>%
+  select(name) %>%
+  mutate(rank = row_number()) %>%
+  arrange(rank)
+
+top_10_sd_names %>%
+  kable(caption = "Top 10 School Districts by Employee Debt in 2022", col.names = c("Rank", "School District")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+

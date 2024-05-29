@@ -36,14 +36,21 @@ library(patchwork)
 library(showtext)
 library(RColorBrewer)
 library(reshape2)
+library(tools)
 
+knitr::opts_chunk$set(warning = FALSE)
 
 States3y <- read.csv("all_states_3years.csv")
-Cities3y <- read.csv("top100_cities_3years.csv")
-Counties3y <- read.csv("top100_counties_3years.csv")
-SD3y <- read.csv("top100_sd_3years.csv")
+Cities3y <- read.csv("top100_cities.csv")
+Counties3y <- read.csv("top100_counties.csv")
+SD3y_v1 <- read.csv("top100_sd.csv")
+SD3y_v2 <- read.csv("top100_sd_3years.csv")
 CensusStates <- read.csv("CensusStates.csv")
 CensusCities_Counties <- read.csv("CensusCities_Conties.csv")
+
+StateGDP <- read_xlsx("State_GDP.xlsx")
+
+PartisanS<- read.csv("partisan_lean_STATES.csv")
 
 
 source("APR functions.R")
@@ -56,23 +63,537 @@ knitr::opts_chunk$set(
   fig.align = "center",
   cache = FALSE
 )
+
+options(scipen = 999)
+
 ```
 
 ```{r, echo=FALSE}
-#Add per capita
 States3y <- States3y %>%
-  mutate(npl_per_capita = net_pension_liability / population) 
+  mutate(npl_per_capita = net_pension_liability / population,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ population,
+         budget_deficit = revenues - expenses) 
 
 Cities3y  <- Cities3y %>%
-  mutate(npl_per_capita = net_pension_liability / population) 
+    mutate(npl_per_capita = net_pension_liability / population,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ population,
+         budget_deficit = revenues - expenses) 
 
 Counties3y <- Counties3y %>%
-  mutate(npl_per_capita = net_pension_liability / population) 
+  mutate(npl_per_capita = net_pension_liability / population,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ population,
+         budget_deficit = revenues - expenses) 
 
-SD3y <- SD3y %>%
-  mutate(npl_per_student= net_pension_liability / students) 
+
+SD3y_v1 <- SD3y_v1 %>%
+  mutate(npl_per_student= net_pension_liability / enrollment_22,
+         employee_debt = net_pension_liability + net_opeb_liability + compensated_absences,
+         employee_debt_per_capita = (net_pension_liability + net_opeb_liability)/ enrollment_22,
+         budget_deficit = revenues - expenses) 
+
+
+name_data <- SD3y_v2 %>% select(id, name)
+
+SD3y <- left_join(SD3y_v1, name_data, by = "id")
+SD3y <- SD3y %>% rename(name = name.y)
+
 
 ```
+
+
+
+# Employee Debt 
+
+```{r, echo=FALSE}
+
+Employee_debt_combined <- bind_rows(
+  States3y %>% mutate(Dataset = "State"),
+  SD3y %>% mutate(Dataset = "SD"),
+  Cities3y %>% mutate(Dataset = "City"),
+  Counties3y %>% mutate(Dataset = "County")
+) %>%
+select(Dataset, employee_debt, employee_debt_per_capita, year)
+
+ggplot(Employee_debt_combined, aes(x = Dataset, y = employee_debt, fill = factor(year))) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Employee Debt by Entity",
+    x = "Entity",
+    y = "Employee Debt (NPL + OPEB)",
+    fill = "Year"
+  ) +
+  scale_fill_manual(values = c("#FDD5A9", "#FC8D82", "#D73043")) +
+  theme_minimal() +
+  scale_y_continuous(
+    labels = label_number(scale = 1 / 1e9, suffix = "B", prefix = "$")
+  ) +
+  coord_flip() +
+  theme_reason()
+
+```
+```{r, echo=FALSE}
+
+employee_debt_summary <- Employee_debt_combined %>%
+  group_by(Dataset, year) %>%
+  summarize(total_employee_debt = sum(employee_debt, na.rm = TRUE))
+
+employee_debt_summary %>%
+  kable(caption = "Total Employee Debt by Entity and Year")
+
+```
+
+## Employee Debt Ranking By Entity 
+
+### States
+```{r, echo=FALSE}
+
+States3y_sorted <- States3y %>%
+  arrange(name, state.abb, year)
+
+States3y_sorted_EmployeeDebt <- States3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    nominal_difference_ED = last(employee_debt) - first(employee_debt),
+    percent_difference_ED = (last(employee_debt) - first(employee_debt)) / first(employee_debt) * 100,
+    nominal_difference_ED_c = last(employee_debt_per_capita) - first(employee_debt_per_capita),
+    percent_difference_ED_c = (last(employee_debt_per_capita) - first(employee_debt_per_capita)) / first(employee_debt_per_capita) * 100)
+
+States3y_sorted_EmployeeDebt <- States3y_sorted_EmployeeDebt %>%
+  mutate(employee_debt_per_capita = as.numeric(employee_debt_per_capita)) %>%
+  mutate(npl_per_capita = as.numeric(npl_per_capita))
+
+
+```
+
+
+```{r, echo=FALSE}
+
+States3y_sorted_EmployeeDebtsubset <- States3y_sorted_EmployeeDebt %>%
+  filter(year == 2022) %>%
+  select(name, employee_debt, employee_debt_per_capita, nominal_difference_ED, percent_difference_ED, nominal_difference_ED_c)
+
+States3y_sorted_EmployeeDebt_reactable <- reactable(
+  States3y_sorted_EmployeeDebtsubset,
+  columns = list(
+    name = colDef(
+      name = "State Name",
+      cell = function(value) tools::toTitleCase(as.character(value))),  
+    employee_debt = colDef(
+      name = "2022 Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    employee_debt_per_capita = colDef(
+      name = "Employee Debt Per Capita",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    nominal_difference_ED = colDef(
+      name = "Nominal Change in Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    percent_difference_ED = colDef(
+      name = "Percentage Change in Employee Debt",
+      format = colFormat(suffix = "%", digits = 2)),
+    nominal_difference_ED_c = colDef(
+      name = "Nominal Change in Per Capita Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+States3y_sorted_EmployeeDebt_reactable
+
+```
+
+### Cities
+
+```{r, echo=FALSE}
+
+Cities3y_sorted <- Cities3y %>%
+  arrange(name, state.abb, year)
+
+Cities3y_sorted_EmployeeDebt <- Cities3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    nominal_difference_ED = last(employee_debt) - first(employee_debt),
+    percent_difference_ED = (last(employee_debt) - first(employee_debt)) / first(employee_debt) * 100,
+    nominal_difference_ED_c = last(employee_debt_per_capita) - first(employee_debt_per_capita),
+    percent_difference_ED_c = (last(employee_debt_per_capita) - first(employee_debt_per_capita)) / first(employee_debt_per_capita) * 100)
+
+Cities3y_sorted_EmployeeDebt <- Cities3y_sorted_EmployeeDebt %>%
+  mutate(employee_debt_per_capita = as.numeric(employee_debt_per_capita)) %>%
+  mutate(npl_per_capita = as.numeric(npl_per_capita))
+
+
+```
+
+```{r, echo=FALSE}
+
+Cities3y_sorted_EmployeeDebt_subset <- Cities3y_sorted_EmployeeDebt %>%
+  filter(year == 2022) %>%
+  select(name, state.name, employee_debt, employee_debt_per_capita, nominal_difference_ED, percent_difference_ED, nominal_difference_ED_c)
+
+Cities3y_sorted_EmployeeDebt_reactable <- reactable(
+  Cities3y_sorted_EmployeeDebt_subset,
+  columns = list(
+    name = colDef(
+      name = "Name",
+      cell = function(value) tools::toTitleCase(as.character(value))),  
+    state.name = colDef(
+      name = "State",
+      cell = function(value) tools::toTitleCase(as.character(value))),  
+    employee_debt = colDef(
+      name = "2022 Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    employee_debt_per_capita = colDef(
+      name = "Employee Debt Per Capita",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    nominal_difference_ED = colDef(
+      name = "Nominal Change in Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    percent_difference_ED = colDef(
+      name = "Percentage Change in Employee Debt",
+      format = colFormat(suffix = "%", digits = 2)),
+    nominal_difference_ED_c = colDef(
+      name = "Nominal Change in Per Capita Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+Cities3y_sorted_EmployeeDebt_reactable
+
+```
+
+### Counties
+
+```{r, echo=FALSE}
+
+Counties3y_sorted <- Counties3y %>%
+  arrange(name, state.abb, year)
+
+Counties3y_sorted_EmployeeDebt <- Counties3y_sorted %>%
+  group_by(name, state.name) %>%
+  mutate(
+    nominal_difference_ED = last(employee_debt) - first(employee_debt),
+    percent_difference_ED = (last(employee_debt) - first(employee_debt)) / first(employee_debt) * 100,
+    nominal_difference_ED_c = last(employee_debt_per_capita) - first(employee_debt_per_capita),
+    percent_difference_ED_c = (last(employee_debt_per_capita) - first(employee_debt_per_capita)) / first(employee_debt_per_capita) * 100)
+
+Counties3y_sorted_EmployeeDebt <- Counties3y_sorted_EmployeeDebt %>%
+  mutate(employee_debt_per_capita = as.numeric(employee_debt_per_capita)) %>%
+  mutate(npl_per_capita = as.numeric(npl_per_capita))
+
+
+```
+
+```{r, echo=FALSE}
+
+Counties3y_sorted_EmployeeDebt_subset <- Counties3y_sorted_EmployeeDebt %>%
+  filter(year == 2022) %>%
+  select(name,state.name, employee_debt, employee_debt_per_capita, nominal_difference_ED, percent_difference_ED, nominal_difference_ED_c)
+
+Counties3y_sorted_EmployeeDebt_reactable <- reactable(
+  Counties3y_sorted_EmployeeDebt_subset,
+  columns = list(
+    name = colDef(
+      name = "Name",
+      cell = function(value) tools::toTitleCase(as.character(value))), 
+   state.name = colDef(
+      name = "State",
+      cell = function(value) tools::toTitleCase(as.character(value))),  
+    employee_debt = colDef(
+      name = "2022 Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    employee_debt_per_capita = colDef(
+      name = "Employee Debt Per Capita",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    nominal_difference_ED = colDef(
+      name = "Nominal Change in Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    percent_difference_ED = colDef(
+      name = "Percentage Change in Employee Debt",
+      format = colFormat(suffix = "%", digits = 2)),
+    nominal_difference_ED_c = colDef(
+      name = "Nominal Change in Per Capita Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+Counties3y_sorted_EmployeeDebt_reactable
+
+```
+
+### School Districts
+
+```{r, echo=FALSE}
+
+SD3y_sorted <- SD3y %>%
+  arrange(name, state.abb, year)
+
+SD3y_sorted_EmployeeDebt <- SD3y_sorted %>%
+  group_by(name) %>%
+  mutate(
+    nominal_difference_ED = last(employee_debt) - first(employee_debt),
+    percent_difference_ED = (last(employee_debt) - first(employee_debt)) / first(employee_debt) * 100,
+    nominal_difference_ED_c = last(employee_debt_per_capita) - first(employee_debt_per_capita),
+    percent_difference_ED_c = (last(employee_debt_per_capita) - first(employee_debt_per_capita)) / first(employee_debt_per_capita) * 100)
+
+SD3y_sorted_EmployeeDebt <- SD3y_sorted_EmployeeDebt %>%
+  mutate(employee_debt_per_capita = as.numeric(employee_debt_per_capita)) %>%
+  mutate(npl_per_capita = as.numeric(npl_per_student))
+
+
+```
+
+```{r, echo=FALSE}
+SD3y_sorted_EmployeeDebt_subset <- SD3y_sorted_EmployeeDebt %>%
+  filter(year == 2022) %>%
+  select(name, state.name, employee_debt, employee_debt_per_capita, nominal_difference_ED, percent_difference_ED, nominal_difference_ED_c)
+
+SD3y_sorted_EmployeeDebt_reactable <- reactable(
+  SD3y_sorted_EmployeeDebt_subset,
+  columns = list(
+    name = colDef(
+      name = "Name",
+      cell = function(value) tools::toTitleCase(as.character(value))),  
+     state.name = colDef(
+      name = "State",
+      cell = function(value) tools::toTitleCase(as.character(value))),  
+    employee_debt = colDef(
+      name = "2022 Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    employee_debt_per_capita = colDef(
+      name = "Employee Debt Per Student",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    nominal_difference_ED = colDef(
+      name = "Nominal Change in Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))),
+    percent_difference_ED = colDef(
+      name = "Percentage Change in Employee Debt",
+      format = colFormat(suffix = "%", digits = 2)),
+    nominal_difference_ED_c = colDef(
+      name = "Nominal Change in Per Student Employee Debt",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+SD3y_sorted_EmployeeDebt_reactable
+
+```
+
+
+# The Budget
+
+
+## Debt to GDP Ratio 
+```{r, echo=FALSE}
+States3y <- States3y %>%
+  left_join(StateGDP %>% select(state.name, GDP), by = "state.name")
+
+States3y <- States3y %>%
+  left_join(PartisanS %>% select(state.name, X2022), by = "state.name")
+  
+States3y <- States3y %>%
+  rename(lean = X2022)
+
+State3y_debtGDP_ratio <- States3y %>%
+  filter(year == 2022) %>%
+  mutate(debt_to_GDP_ratio = total_liabilities / GDP * 100) %>%
+  arrange(debt_to_GDP_ratio)%>%
+  select(state.name, debt_to_GDP_ratio, total_liabilities, GDP, lean, net_pension_liability, net_opeb_liability, employee_debt, population, npl_per_capita, employee_debt_per_capita)
+
+
+ggplot(State3y_debtGDP_ratio, aes(x = GDP, y = debt_to_GDP_ratio)) +
+  geom_point() +
+  geom_text(aes(label = state.name), vjust = -1, hjust = 1) +
+  labs(
+    title = "State Debt to GDP Ratio (2022)",
+    x = "GDP ($)",
+    y = "Debt to GDP Ratio (%)"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1))+
+  theme_reason()
+
+
+```
+
+```{r, echo=FALSE}
+
+ggplot(State3y_debtGDP_ratio, aes(x = GDP, y = debt_to_GDP_ratio, color = factor(sign(lean)))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +  
+  labs(
+    title = "State Debt to GDP Ratio (2022)",
+    x = "GDP ($)",
+    y = "Debt to GDP Ratio (%)",
+    color = "Partisan Lean"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_color_manual(values = c("red", "blue"), labels = c("Republican leaning", "Democrat leaning")) +
+  ggtitle("States: Correlation Between GDP and Debt to GDP Ratio")
+```
+ 
+
+```{r, echo=FALSE}
+
+#| fig-cap: "States: Correlation Between Debt to GDP Ratio and Partisan Lean"
+
+ggplot(State3y_debtGDP_ratio, aes(x = lean, y = debt_to_GDP_ratio, color = factor(sign(lean)))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +  
+  labs(
+    title = "State Debt to GDP Ratio (2022)",
+    x = "Partisan Lean",
+    y = "Debt to GDP Ratio (%)",
+    color = "Partisan Lean"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_color_manual(values = c("red", "blue"), labels = c("Republican leaning", "Democrat leaning")) +
+  ggtitle("States: Correlation Between Partisan Lean and Debt to GDP Ratio")
+
+```
+
+```{r, echo=FALSE}
+
+ggplot(State3y_debtGDP_ratio, aes(x = lean, y = GDP, color = factor(sign(lean)))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +  
+  stat_cor(method = "pearson", aes(group = 1), label.x = 1.5, label.y = 20, label.sep = "\n") +
+  labs(
+    title = "State Debt to GDP Ratio (2022)",
+    x = "Partisan Lean",
+    y = "GDP ($)",
+    color = "Partisan Lean"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_color_manual(values = c("red", "blue"), labels = c("Republican leaning", "Democrat leaning")) +
+  ggtitle("States: Correlation Between GDP and Partisan Lean") 
+
+```
+
+
+# Statistical Tests
+
+```{r, echo=FALSE}
+
+State3y_debtGDP_ratio_2 <- State3y_debtGDP_ratio %>%
+  filter(!is.na(log(lean)), is.finite(log(lean)),
+         !is.na(employee_debt_per_capita), is.finite(employee_debt_per_capita)) %>%
+  filter(!is.na(log(employee_debt_per_capita)), is.finite(log(employee_debt_per_capita))) %>%
+  filter(!is.na(debt_to_GDP_ratio), is.finite(debt_to_GDP_ratio))  %>%
+  filter(!is.na(log(population)), is.finite(log(population)),
+         !is.na(net_pension_liability), is.finite(net_pension_liability)) %>%
+  filter(!is.na(log(net_pension_liability)), is.finite(log(net_pension_liability))) %>%
+  filter(!is.na(net_opeb_liability), is.finite(net_opeb_liability)) %>%
+  filter(!is.na(log(net_opeb_liability)), is.finite(log(net_opeb_liability)))
+
+
+```
+
+
+#### Is partisan Lean as a predictor of debt/gdp ratio? 
+Partisan lean explains about 28.13% of the variability in debt_to_GDP_ratio (**) 
+```{r, echo=FALSE}
+State3y_model_1 <- lm(debt_to_GDP_ratio ~ log(lean), data = State3y_debtGDP_ratio_2)
+summary(State3y_model_1)
+
+```
+
+#### Is population as a predictor of Net Pension Liability? 
+Population explains 14.98% of the variability in the net pension liability  (***) 
+```{r, echo=FALSE}
+State3y_model_3 <- lm(net_pension_liability ~ log(population), data = State3y_debtGDP_ratio_2)
+summary(State3y_model_3)
+
+```
+
+#### Is population as a predictor of Net OPEB Liability? 
+Population explains about 31.21% of the variability in the net OPEB liability  (***) 
+```{r, echo=FALSE}
+State3y_model_4 <- lm(net_opeb_liability ~ log(population), data = State3y_debtGDP_ratio_2)
+summary(State3y_model_4)
+
+```
+
+
+#### Is partisan lean a good predictor of Net Pension Liability?
+
+There is no significant relationship between partisan lean and net pension liability.
+
+```{r, echo=FALSE}
+
+State3y_model_5 <- lm(lean ~ log(net_pension_liability), data = State3y_debtGDP_ratio_2)
+summary(State3y_model_5)
+
+```
+
+#### Is partisan lean a good predictor of Net OPEB Liability?
+
+there is no significant relationship between net OPEB liability and partisan lean
+
+```{r, echo=FALSE}
+State3y_model_6 <- lm(lean ~ log(net_opeb_liability), data = State3y_debtGDP_ratio_2)
+summary(State3y_model_6)
+
+```
+
+#### Is partisan lean a good predictor of per capita employee debt?
+
+There is no significant relationship between partisan lean and employee debt per capita.
+
+```{r, echo=FALSE}
+State3y_model_6 <- lm(employee_debt_per_capita~ log(lean), data = State3y_debtGDP_ratio_2)
+summary(State3y_model_6)
+
+```
+
+
+```{r, echo=FALSE}
+
+
+State3y_debtGDP_ratio_reactable <- reactable(
+  State3y_debtGDP_ratio,
+  columns = list(
+    state.name = colDef(
+      name = "State",
+      cell = function(value) tools::toTitleCase(as.character(value))
+    ),
+    debt_to_GDP_ratio = colDef(
+      name = "Debt to GDP Ratio",
+      cell = function(value) sprintf("%s", percent(value / 100, accuracy = 0.1))  
+    ),
+    total_liabilities = colDef(
+      name = "Total Liabilities",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))
+    ),
+    GDP = colDef(
+      name = "GDP",
+      cell = function(value) sprintf("$%s", format(value, big.mark = ","))
+    )
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE
+)
+
+
+State3y_debtGDP_ratio_reactable
+
+```
+
+
 
 
 # Moves in Unfunded Liabiities from 2020-2021
@@ -91,7 +612,7 @@ Combined3y <- bind_rows(
 )
 
 Combined3y <- Combined3y %>%
-  mutate(population = ifelse(dataset == "School Districts", students, population))
+  mutate(population = ifelse(dataset == "School Districts", enrollment_22, population))
 
 total_unfunded_liabilities <- Combined3y %>%
   group_by(year, dataset) %>%
@@ -104,9 +625,6 @@ total_unfunded_liabilities$dataset <- factor(total_unfunded_liabilities$dataset,
 
 
 ```{r, echo=FALSE}
-
-Combined3y <- Combined3y %>%
-  mutate(population = ifelse(dataset == "School Districts", students, population))
 
 total_unfunded_liabilities <- Combined3y %>%
   group_by(year, dataset) %>%
@@ -184,8 +702,7 @@ combined_change_data %>%
             position = position_dodge(width = 0.9),
             vjust = -0.5, 
             size = 3, 
-            show.legend = FALSE,
-            hjust = -0.2) +  
+            show.legend = FALSE) +  
   labs(
     title = "NPL by Entity",
     x = "Entity",
@@ -221,8 +738,7 @@ combined_change_data %>%
             position = position_dodge(width = 0.9),
             vjust = -0.5, 
             size = 3, 
-            show.legend = FALSE,
-            hjust = -0.2) +  # Adjust position to sit outside the graph
+            show.legend = FALSE) +  
   labs(
     title = "Net OPEB Liability by Entity",
     x = "Entity",
@@ -501,8 +1017,6 @@ c_summary_quartiles_21.22 %>%
 ```
 
 ```{r, echo=FALSE}
-
-
 selected_columns_cities_NPL_20to22diff_subset <- c("name", "state.abb", "nominal_difference_NPL20to22", "percent_difference_NPL20to22", "nominal_difference_L20to22", "percent_difference_L20to22", "population")
 cities_NPL_20to22diff_subset <- cities_NPL_20to22diff_filter[selected_columns_cities_NPL_20to22diff_subset]
 
@@ -532,9 +1046,7 @@ cities_NPL_20to22diff_reactable <- reactable(
   searchable = TRUE
 )
 
-
 cities_NPL_20to22diff_reactable
-
 ```
 
 
@@ -610,8 +1122,7 @@ Cities3y_2 <- subset(Cities3y, select = -c(X, year, state.abb, state.name, geo_i
 corCities <- cor(Cities3y_2)
 
 # For SD3y
-SD3y_2 <- subset(SD3y, select = -c(X, state.abb, state.name, ncesID, name, county_name, city, locale, year,nces_original_name, net_pension_assets, net_opeb_assets, id))
-corSD <- cor(SD3y_2)
+SD3y_2 <- subset(SD3y, select = -c(X, state.abb, state.name, ncesID, name, city, county, locale, year, net_pension_assets, net_opeb_assets, id))
 
 
 ```
@@ -687,7 +1198,6 @@ ggplot(corCounties, aes(Var1, Var2, fill = value)) +
 
 
 ### School Districts 
-```{r, echo=FALSE}
 melted_corStates <- melt(corSD)
 
 ggplot(melted_corStates, aes(Var1, Var2, fill = value)) +
@@ -705,8 +1215,6 @@ ggplot(melted_corStates, aes(Var1, Var2, fill = value)) +
     y = "",  
     fill = "Correlation Strength" 
   )
-
-```
 
 
 
@@ -1020,6 +1528,169 @@ counties_OPEB_20to22diff_reactable
 
 ```
 
+# Asset Analysis 
+
+## Debt Ratio 
+
+```{r, echo=FALSE}
+
+States3y <- States3y %>%
+  mutate(debt_ratio = total_assets / total_liabilities) %>%
+  filter(!is.na(debt_ratio))
+
+Cities3y <- Cities3y %>%
+  mutate(debt_ratio = total_assets / total_liabilities) %>%
+  filter(!is.na(debt_ratio))
+
+Counties3y <- Counties3y %>%
+  mutate(debt_ratio = total_assets / total_liabilities) %>%
+  filter(!is.na(debt_ratio))
+
+SD3y <- SD3y %>%
+  mutate(debt_ratio = total_assets / total_liabilities) %>%
+  filter(!is.na(debt_ratio))
+
+
+```
+
+### Debt Ratio of States (2022)
+
+```{r, echo=FALSE}
+
+States3y_debt_subset <- States3y %>%
+  filter(year == 2022) %>%
+  arrange(debt_ratio)
+
+selected_columns_debt_retractable <- c("name", "debt_ratio", "total_assets","total_liabilities")
+States3y_debt_subset <- States3y_debt_subset[selected_columns_debt_retractable]
+
+States3y_debt_subset_reactable <- reactable(
+  data = States3y_debt_subset,
+  columns = list(
+    name = colDef(name = "State"),
+    debt_ratio = colDef(
+      name = "Debt Ratio",
+      cell = function(value) sprintf("%.2f %%", value * 100)), # Multiplied by 100 here
+    total_assets = colDef(
+      name = "Total Asset",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    total_liabilities = colDef(
+      name = "Total Liabilities",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE,
+)
+
+States3y_debt_subset_reactable
+
+
+```
+
+### Debt Ratio of Cities (2022)
+
+```{r, echo=FALSE}
+
+Cities3y_debt_subset <- Cities3y %>%
+  filter(year == 2022) %>%
+  arrange(debt_ratio)
+
+selected_columns_debt_retractable <- c("name", "debt_ratio", "total_assets","total_liabilities")
+Cities3y_debt_subset <- Cities3y_debt_subset[selected_columns_debt_retractable]
+
+Cities3y_debt_subset_reactable <- reactable(
+  data = Cities3y_debt_subset,
+  columns = list(
+    name = colDef(name = "State"),
+    debt_ratio = colDef(
+      name = "Debt Ratio",
+      cell = function(value) sprintf("%.2f %%", value * 100)), # Multiplied by 100 here
+    total_assets = colDef(
+      name = "Total Asset",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    total_liabilities = colDef(
+      name = "Total Liabilities",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE,
+)
+
+Cities3y_debt_subset_reactable
+
+
+```
+
+### Debt Ratio of Counties (2022)
+
+```{r, echo=FALSE}
+
+Counties3y_debt_subset <- Counties3y %>%
+  filter(year == 2022) %>%
+  arrange(debt_ratio)
+
+selected_columns_debt_retractable <- c("name", "debt_ratio", "total_assets","total_liabilities")
+Counties3y_debt_subset <- Counties3y_debt_subset[selected_columns_debt_retractable]
+
+Counties3y_debt_subset_reactable <- reactable(
+  data = Counties3y_debt_subset,
+  columns = list(
+    name = colDef(name = "State"),
+    debt_ratio = colDef(
+      name = "Debt Ratio",
+      cell = function(value) sprintf("%.2f %%", value * 100)), # Multiplied by 100 here
+    total_assets = colDef(
+      name = "Total Asset",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    total_liabilities = colDef(
+      name = "Total Liabilities",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE,
+)
+
+Counties3y_debt_subset_reactable
+
+
+```
+
+
+
+### School Districts Debt Ratio (2022)
+
+```{r, echo=FALSE}
+
+SD3y_debt_subset <- SD3y %>%
+  filter(year == 2022) %>%
+  arrange(debt_ratio)
+
+selected_columns_debt_retractable <- c("name", "state.abb", "debt_ratio", "total_assets","total_liabilities")
+SD3y_debt_subset <- SD3y_debt_subset[selected_columns_debt_retractable]
+
+SD3y_debt_subset_reactable <- reactable(
+  data = SD3y_debt_subset,
+  columns = list(
+    name = colDef(name = "School District"),
+    state.abb = colDef(name = "State"),
+    debt_ratio = colDef(
+      name = "Debt Ratio",
+      cell = function(value) sprintf("%.2f %%", value * 100)), # Multiplied by 100 here
+    total_assets = colDef(
+      name = "Total Asset",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ","))),
+    total_liabilities = colDef(
+      name = "Total Liabilities",
+      cell = function(value) sprintf("$ %s", format(value, big.mark = ",")))
+  ),
+  defaultPageSize = 10,
+  searchable = TRUE,
+)
+
+SD3y_debt_subset_reactable
+
+
+```
 
 
 
